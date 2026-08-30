@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { TOOLS } from '@/config';
+import { extractDocumentText, isExtractable } from '@/lib/files/extract-text';
 import type { Tool, ToolResult } from './types';
 
 /**
@@ -43,17 +44,12 @@ export const fileList: Tool<Record<string, never>> = {
   },
 };
 
-/** Text-ish types we can extract from without a parsing library. */
-const EXTRACTABLE = new Set([
-  'text/plain', 'text/markdown', 'text/csv', 'text/html',
-  'application/json', 'application/xml', 'text/xml',
-]);
-
 export const fileRead: Tool<{ fileId: string }> = {
   name: 'file_read',
   description:
-    'Read the text content of a file attached to this conversation. ' +
-    'Takes a file id from file_list. Returns the text, truncated if very long.',
+    'Read the text content of a file attached to this conversation — plain text, ' +
+    'Markdown, CSV, HTML, JSON, XML, PDF or Word (.docx). Takes a file id from ' +
+    'file_list. Long documents are truncated, and you are told when that happens.',
   inputSchema: z.object({ fileId: z.string().uuid() }).strict(),
   externallyObservable: false,
   // The bytes were chosen by an uploader, not by us.
@@ -70,70 +66,55 @@ export const fileRead: Tool<{ fileId: string }> = {
     }
 
     const { meta, bytes } = file;
+    const cite = [{ ref: meta.id, label: meta.filename }];
 
     if (bytes.byteLength > TOOLS.perTool.file_read.maxBytes) {
       return {
         content: `The file "${meta.filename}" is too large to read (${Math.ceil(bytes.byteLength / 1024)} KB).`,
-        citations: [{ ref: meta.id, label: meta.filename }],
+        citations: cite,
       };
     }
 
-    if (!EXTRACTABLE.has(meta.mime_type)) {
+    if (!isExtractable(meta.mime_type)) {
       // Honest refusal rather than decoding bytes as text and producing noise
       // the model would then reason about as if it were content.
       return {
         content:
           `"${meta.filename}" is ${meta.mime_type}, which cannot be read as text. ` +
-          `Only plain text, Markdown, CSV, HTML, JSON and XML are supported.`,
-        citations: [{ ref: meta.id, label: meta.filename }],
+          `Supported: plain text, Markdown, CSV, HTML, JSON, XML, PDF and Word (.docx).`,
+        citations: cite,
       };
     }
 
-    const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-    const extracted = meta.mime_type === 'text/html' ? stripHtml(text) : text;
-    const { content, truncated } = truncate(extracted, TOOLS.perTool.file_read.maxBytes / 4);
+    const result = await extractDocumentText(bytes, meta.mime_type);
+
+    if (!result.ok) {
+      // A refusal the model can act on — "that PDF is a scan" lets it ask for a
+      // text version, where "the tool failed" leaves it guessing.
+      return {
+        content: `"${meta.filename}" could not be read: ${result.reason}.`,
+        citations: cite,
+        meta: { filename: meta.filename, mime_type: meta.mime_type, extraction_failed: result.reason },
+      };
+    }
+
+    const notes = [
+      result.truncated ? 'truncated' : null,
+      result.note ?? null,
+    ].filter(Boolean);
 
     return {
-      content:
-        `"${meta.filename}"${truncated ? ' (truncated)' : ''}:\n\n${content}`,
-      citations: [{ ref: meta.id, label: meta.filename }],
+      content: `"${meta.filename}"${notes.length ? ` (${notes.join('; ')})` : ''}:\n\n${result.text}`,
+      citations: cite,
       meta: {
-        filename: meta.filename, mime_type: meta.mime_type,
-        bytes: bytes.byteLength, truncated,
+        filename: meta.filename,
+        mime_type: meta.mime_type,
+        bytes: bytes.byteLength,
+        kind: result.kind,
+        chars: result.text.length,
+        truncated: result.truncated,
+        ...(result.pages !== undefined ? { pages: result.pages, pages_read: result.pagesRead } : {}),
       },
     };
   },
 };
-
-/**
- * Crude HTML-to-text. Removes script and style bodies first, because their
- * contents are not prose and a `<script>` block full of URLs is exactly the
- * sort of thing that reads as an instruction once flattened.
- */
-export function stripHtml(html: string): string {
-  return html
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/[ \t]+/g, ' ')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-
-/** Truncate on a character budget, cutting at a line break where possible. */
-export function truncate(text: string, maxChars: number): { content: string; truncated: boolean } {
-  if (text.length <= maxChars) return { content: text, truncated: false };
-  const cut = text.slice(0, maxChars);
-  const lastBreak = cut.lastIndexOf('\n');
-  return {
-    content: lastBreak > maxChars * 0.8 ? cut.slice(0, lastBreak) : cut,
-    truncated: true,
-  };
-}

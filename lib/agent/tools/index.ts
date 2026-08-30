@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { KILL_SWITCHES } from '@/config';
 import type { ScopedAgentContext } from '@/lib/db/scoped-agent';
 import { fileList, fileRead } from './file';
+import { documentExtract } from './document';
 import { webFetch, searchAvailable } from './web';
 import { ToolSession } from './session';
 import type { AnyTool } from './types';
@@ -22,7 +23,12 @@ export type { Tool, ToolResult, Citation, AnyTool } from './types';
  * per-turn budget doing it; an absent capability it simply works around.
  */
 function allTools(): AnyTool[] {
-  const tools: AnyTool[] = [fileList as AnyTool, fileRead as AnyTool, webFetch as AnyTool];
+  const tools: AnyTool[] = [
+    fileList as AnyTool,
+    fileRead as AnyTool,
+    documentExtract as AnyTool,
+    webFetch as AnyTool,
+  ];
 
   // web_search needs a provider. Registered only when one is configured — see
   // lib/agent/tools/web.ts for why this is not the server-side search tool.
@@ -47,34 +53,32 @@ export function openToolSession(
 /**
  * Convert a tool to the wire shape the model API expects.
  *
- * `zod-to-json-schema` is not a dependency, so schemas are described by hand
- * here. That is a deliberate trade at this size: three tools with small inputs,
- * versus a dependency whose output would still need reviewing. If the tool count
- * grows past a handful, generate them.
+ * This was hand-rolled while there were three tools with one string input
+ * between them, and the shortcut it took — *describe every property as a
+ * string* — was fine for exactly as long as that held. It stopped holding with
+ * `document_extract`, whose `fields` input is an array: the model would have
+ * been told to send a string, sent one, and had it rejected by the very schema
+ * that had just described it. A wrong tool schema is a silent capability
+ * failure, because the model simply appears not to use the tool well.
+ *
+ * `z.toJSONSchema` ships with Zod 4 and derives it from the same object that
+ * validates the input, so the description and the enforcement cannot disagree.
+ * `$schema` is stripped: the Anthropic API rejects the meta-schema key.
  */
 export function toolDefinition(tool: AnyTool): {
   name: string;
   description: string;
   input_schema: Record<string, unknown>;
 } {
-  return {
-    name: tool.name,
-    description: tool.description,
-    input_schema: describeSchema(tool.inputSchema as z.ZodType),
-  };
-}
+  const generated = z.toJSONSchema(tool.inputSchema as z.ZodType, {
+    // The model produces INPUT to the schema, so encode/decode differences
+    // (defaults, transforms) must be resolved on the input side.
+    io: 'input',
+    // A tool schema we cannot represent should fail here, loudly, rather than
+    // reach the model as `{}` and look like a model that ignores its tools.
+    unrepresentable: 'throw',
+  }) as Record<string, unknown>;
+  delete generated.$schema;
 
-function describeSchema(schema: z.ZodType): Record<string, unknown> {
-  const shape = (schema as unknown as { shape?: Record<string, z.ZodType> }).shape;
-  if (!shape) return { type: 'object', properties: {}, additionalProperties: false };
-
-  const properties: Record<string, unknown> = {};
-  const required: string[] = [];
-
-  for (const [key, field] of Object.entries(shape)) {
-    properties[key] = { type: 'string' };
-    if (!field.safeParse(undefined).success) required.push(key);
-  }
-
-  return { type: 'object', properties, required, additionalProperties: false };
+  return { name: tool.name, description: tool.description, input_schema: generated };
 }

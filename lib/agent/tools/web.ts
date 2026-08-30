@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { TOOLS, serverEnv } from '@/config';
-import { stripHtml, truncate } from './file';
+import { stripHtml, truncate } from '@/lib/files/extract-text';
 import { checkUrl } from './url-safety';
 import type { Tool, ToolResult } from './types';
 

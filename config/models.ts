@@ -21,7 +21,7 @@
  *   - Large `max_tokens` must stream, or the request hits the HTTP timeout.
  */
 
-export type ModelTier = 'reflex' | 'judge' | 'converse' | 'reason';
+export type ModelTier = 'reflex' | 'judge' | 'extract' | 'converse' | 'reason';
 
 /** `output_config.effort` — the Claude 5-family replacement for thinking budgets. */
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
@@ -105,7 +105,7 @@ export interface TierConfig {
 }
 
 /**
- * Four tiers, ordered by cost. The rule for choosing one: pick the cheapest
+ * Five tiers, ordered by cost. The rule for choosing one: pick the cheapest
  * tier whose failure mode is acceptable. A wrong `reflex` answer costs a
  * slightly worse log line; a wrong `converse` answer is the product.
  */
@@ -134,6 +134,32 @@ export const TIERS = {
     maxRetries: 1,
     description:
       'The response-gate judge and memory extraction. Structured output only, never prose.',
+  },
+
+  /**
+   * T1.5 — structured output over a LONG input.
+   *
+   * Same model and depth as `judge`; the difference is entirely output room.
+   * `judge` answers with one verdict and is capped at 1k tokens for it. Pulling
+   * twelve fields and a supporting quote for each out of a contract does not
+   * fit in 1k, and the failure is the bad kind: the response stops mid-object,
+   * fails validation, and reads as "the model could not find the parties".
+   *
+   * Reusing `judge` and raising its ceiling was the alternative, and it would
+   * have loosened the bound on the gate — the one call in this system that runs
+   * on every single message.
+   */
+  extract: {
+    model: 'claude-sonnet-5',
+    effort: 'low',
+    thinking: { kind: 'adaptive', display: 'omitted' },
+    maxTokens: 4_096,
+    stream: false,
+    // A long document is a long prompt to read before the first token.
+    timeoutMs: 45_000,
+    maxRetries: 1,
+    description:
+      'Extracting a named set of fields from a document. Structured output only.',
   },
 
   /** T2 — the actual conversational reply. The one users read. */
@@ -177,6 +203,7 @@ export const PURPOSE_TIER = {
   gate_judge: 'judge',
   memory_extract: 'judge',
   memory_conflict_explain: 'judge',
+  document_extract: 'extract',
   chat_response: 'converse',
   research_synthesis: 'reason',
   tool_result_summarize: 'reflex',

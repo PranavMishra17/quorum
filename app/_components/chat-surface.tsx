@@ -259,7 +259,7 @@ function Composer({
             type="file"
             onChange={upload}
             disabled={uploading}
-            accept=".txt,.md,.csv,.html,.json,.xml,text/plain,text/markdown,text/csv,text/html,application/json,application/xml"
+            accept=".txt,.md,.csv,.html,.json,.xml,.pdf,.docx,text/plain,text/markdown,text/csv,text/html,application/json,application/xml,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             className="hidden"
           />
         </label>

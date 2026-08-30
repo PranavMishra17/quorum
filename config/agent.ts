@@ -200,6 +200,14 @@ export const TOOLS = {
     web_search: { maxUses: 3, timeoutMs: 15_000 },
     web_fetch: { maxUses: 3, timeoutMs: 15_000, maxContentTokens: 8_000 },
     file_read: { maxUses: 5, timeoutMs: 10_000, maxBytes: 5_000_000 },
+    /**
+     * Extracting a schema from a document is a MODEL call inside a tool call,
+     * so its budget has to leave room for the outer turn. Two uses, because a
+     * legitimate need for a third is more likely a loop than a document.
+     */
+    document_extract: { maxUses: 2, timeoutMs: 45_000 },
+    email_search: { maxUses: 2, timeoutMs: 15_000 },
+    calendar_list: { maxUses: 2, timeoutMs: 15_000 },
   },
 
   /**
@@ -223,6 +231,34 @@ export const TOOLS = {
    * than a request that the model behave.
    */
   postUntrustedAllowlist: [] as readonly string[],
+} as const;
+
+// ---------------------------------------------------------------------------
+// Document extraction — bounds applied AROUND a parser, not inside it
+// ---------------------------------------------------------------------------
+
+/**
+ * See `lib/files/extract-text.ts` for why each of these exists. In short: a
+ * parsing library will bound neither how much text it produces nor how many
+ * pages it walks, and both are cheap for an uploader to inflate.
+ *
+ * `maxExtractedChars` is the one that matters most. A 200 KB `.docx` of one
+ * repeated glyph decompresses to megabytes of text, and the file does not have
+ * to be malicious to be pathological — an exported email thread will do it.
+ */
+export const DOCUMENTS = {
+  /** Ceiling on text handed back from any extractor, before prompt budgeting. */
+  maxExtractedChars: 120_000,
+  /** Pages read from a PDF. Beyond this the agent is told what it did not read. */
+  maxPdfPages: 40,
+  /**
+   * Characters of a document fed to the schema-extraction model call.
+   * Smaller than the read ceiling on purpose: extraction wants the front matter
+   * of a contract, and a 120k-char prompt for a list of parties is waste.
+   */
+  maxCharsForSchemaExtraction: 40_000,
+  /** Fields the model may be asked to pull out in one call. */
+  maxSchemaFields: 12,
 } as const;
 
 /**

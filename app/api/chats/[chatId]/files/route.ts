@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { randomUUID } from 'node:crypto';
 import { createClient, requireActor, NotAuthenticatedError } from '@/lib/db/server';
 import { safeName } from '@/lib/files/safe-name';
+import { DOCX_MIME, PDF_MIME, isExtractable } from '@/lib/files/extract-text';
 
 /**
  * File upload.
@@ -36,7 +37,23 @@ const ALLOWED = new Map<string, string>([
   ['application/json', 'json'],
   ['application/xml', 'xml'],
   ['text/xml', 'xml'],
+  [PDF_MIME, 'pdf'],
+  [DOCX_MIME, 'docx'],
 ]);
+
+/**
+ * The allowlist and the extractor must agree.
+ *
+ * Accepting a type `file_read` cannot parse produces a file the agent can see
+ * listed and never read — worse than refusing the upload, because it looks like
+ * a capability. Asserted at module load rather than in a test, so the two
+ * cannot drift apart in a deploy that never runs the suite.
+ */
+for (const mime of ALLOWED.keys()) {
+  if (!isExtractable(mime)) {
+    throw new Error(`upload allowlist admits ${mime}, which no extractor handles`);
+  }
+}
 
 export async function POST(
   request: NextRequest,
