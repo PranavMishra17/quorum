@@ -56,11 +56,26 @@ stops it. Membership answers *who*; clearance answers *in what capacity*.
 Properties worth stating plainly:
 
 - **It fails closed.** Ambiguity resolves to not-surfacing.
-- **It is cheap.** A set-containment check and an integer comparison.
+- **It is cheap.** An anti-join over the audience snapshot plus an integer
+  comparison — both indexed, both in the same query as the fetch.
 - **It is testable.** The isolation tests below are the ones that prove the thesis.
 - **The model never receives out-of-scope memory at all.** It cannot leak what
   it was never given. This is structural prevention, not a prompt asking the
   model to be discreet.
+
+That last property is the thesis, and it holds — with one bound worth stating
+plainly rather than burying. The audience half is *absolutely* structural:
+`memory_audience` is immutable once written, so there is nothing to race. The
+clearance half is **bounded, not absolute**: membership and clearance are live
+state, and no design that keeps the model call outside a database transaction
+can stop a response being generated from data that went stale mid-turn. The
+guarantee is that a revocation takes effect on the **next privileged read**, not
+that an in-flight turn is retroactively corrected. See
+[D-009](docs/DECISIONS.md).
+
+A second, more fundamental limit: item-level filtering does not defend against a
+human aggregating two separately-authorised answers into a third, unauthorised
+inference. No system surveyed claims to solve this.
 
 ### Retrieval order, and why the order is the design
 
@@ -69,10 +84,19 @@ latency, and precision. Retrieval runs:
 
 ```
 1. FILTER   audience containment + clearance floor  — in SQL, before anything else
-2. RANK     semantic similarity, recency, speaker presence in recent turns
+2. RANK     lexical relevance (ts_rank), recency, speaker presence in recent turns
 3. CAP      a global item budget AND a per-subject cap
 4. LOG      retrieved count and filtered-out count -> agent_events
 ```
+
+**Ranking is lexical, not semantic, and that is a deliberate cut.** Anthropic
+ships no embeddings API, so semantic ranking would mean a second vendor, a second
+key, and a re-embedding migration path — none of which the twelve-hour budget
+justified for a candidate set that the authorisation filter has already reduced
+to tens of items. `lib/memory/embed.ts` exists as an unimplemented interface so
+the upgrade is a one-file change. The honest weakness: lexical matching misses
+paraphrase, which in a legal product is exactly the gap embeddings exist to
+close. See [D-004](docs/DECISIONS.md).
 
 The critical property is that step 1 precedes step 2. Retrieving the top 20 by
 relevance and then discarding the unauthorised ones is a different program with
@@ -93,9 +117,16 @@ Both must pass, on every read.
 | **Membership** | Is this user in this chat? | `chat_members.status = 'member'` |
 | **Clearance** | Is this user badged for this kind of chat? | user's grants vs `chats.required_clearance_id` |
 
-An *External Audit* group is unreachable by a user without that clearance
-**regardless of any membership row**. The axes are independent by construction,
+A gated group is unreachable by a user without **sufficient clearance level**,
+regardless of any membership row. The axes are independent by construction,
 which is exactly what makes the clearance floor meaningful in the memory rule.
+
+The precision matters: clearance is a **monotone integer ladder**, so a user
+holding only a *higher* level satisfies a *lower* requirement without holding
+that specific key. Whether the current ladder ordering is right is
+[D-023](docs/DECISIONS.md), still open — `external_audit` names *who is in the
+room*, which is not obviously the same dimension as *how sensitive the material
+is*, and one integer cannot express both.
 
 ### Enforced at the data layer
 
@@ -104,9 +135,12 @@ creates the table. The publishable Supabase key ships in the browser bundle; it
 is only safe because RLS is what actually stops the query. Client-side checks
 exist for UX and are never the sole guard.
 
-Memory tables are stricter still: **no client access at all.** Policies deny the
-authenticated role outright. Memory is reachable only through the server-side
-scoped path.
+Memory tables are stricter still: **no client access at all.** Postgres has no
+"deny" policy — access is *granted* by at least one `PERMISSIVE` policy and
+narrowed by `RESTRICTIVE` ones. So the construction is: RLS enabled, **no
+permissive policy written at all**, and `SELECT`/`INSERT`/`UPDATE`/`DELETE`
+revoked from `anon` and `authenticated`. With no policy to grant access, no row
+is visible. Memory is reachable only through the server-side scoped path.
 
 ### The agent is the dangerous actor *(planned)*
 
@@ -114,10 +148,20 @@ The agent runs server-side and needs to read across chats to do its job. That
 makes it the single most likely path to a leak, so it never holds an unscoped
 service-role client in the request path.
 
-`ScopedAgentContext` is constructed once per turn from a chat id. It resolves and
-holds the chat's active member set, its clearance level, and the requesting
-user. Every agent read — memory, files, message history — goes through it, and
-it applies the filters in SQL before returning anything.
+`ScopedAgentContext` is constructed once per turn from a chat id. It fixes the
+turn's **identity** — the chat, the acting user, the `turn_id` — and every agent
+read of memory, files, or message history goes through it, applying both
+authorisation axes in SQL before returning anything.
+
+What it deliberately does **not** do is cache the member set or the clearance
+level. An earlier draft of this document said it "resolves and holds" them, and
+that was wrong in an instructive way: holding authorisation state across a
+multi-second model call *is* the time-of-check/time-of-use gap. Membership and
+clearance are therefore re-read, in SQL, at the moment of each privileged read.
+This costs essentially nothing — every PostgREST call is already its own
+transaction — and the alternative (wrapping a whole turn in one long
+transaction) is worse on every axis: it holds a database connection open across
+an external API call, and it fights connection pooling by design.
 
 **A class is not a security boundary.** The honest version of this claim is four
 layers, and only the middle two are enforcement:
@@ -199,8 +243,11 @@ chosen so that each one defends a claim this README makes.
 
 **Authorisation**
 - A non-member cannot read a chat, its messages, its events, or its files.
-- A member without the required clearance cannot read a clearance-gated chat.
-- A removed member loses access from the moment of removal.
+- A member without sufficient clearance cannot read a clearance-gated chat.
+- A removed member's next query returns nothing (row level, via RLS).
+- A removal landing *mid-turn* takes effect on the agent's next privileged read
+  (turn level). Split from the row-level case deliberately: one test alone
+  cannot distinguish "access revoked" from "a cache that happens to be cold".
 - A `requested` membership row grants no read access.
 - A non-admin cannot add, remove, or promote members.
 
@@ -215,11 +262,20 @@ chosen so that each one defends a claim this README makes.
   to be excluded elsewhere, nor gains access to it.
 - A `ScopedAgentContext` built for chat A returns nothing belonging to chat B.
 
-**Agent behaviour**
+**Agent behaviour** — against a stubbed provider, so the suite needs no API key
 - The agent never responds to its own message.
-- The agent stays silent in a group when not addressed.
-- The agent responds when mentioned.
+- The agent responds when mentioned, and a mention overrides the cooldown.
 - The cooldown suppresses a rapid second response.
+- The judge is invoked *only* when the deterministic chain falls through.
+- A judge error, timeout, or malformed verdict resolves to silence.
+
+> These test the **pipeline** — which rule fired, and whether the fail-closed
+> paths hold — not the judge's accuracy at deciding whether an unaddressed
+> remark deserves a reply. That is a genuinely hard task, the one relevant
+> benchmark suggests a zero-shot text-only model would be mediocre at it, and
+> measuring it properly needs a labelled corpus this budget does not have. The
+> honest claim is that the agent's *silence* is guaranteed by deterministic
+> rules and its *speech* is a judgement call that is logged and inspectable.
 
 **Memory lifecycle**
 - A directly stated fact supersedes a conflicting inferred fact.
@@ -239,9 +295,17 @@ requirement, not because each one is obviously correct.
 1. **An `agent` chat type exists with a single human member.** This extends the
    stated minimum of two users per chat. It exists so the agent can be addressed
    directly with different gate behaviour.
-2. **Removed members lose access to history from the moment of removal.** The
+2. **Removed members lose access to history on their next read.** The
    Slack-style alternative — retaining previously visible history — is equally
-   defensible. The stricter reading was chosen deliberately.
+   defensible; the stricter reading was chosen deliberately.
+
+   "Next read", not "the moment of removal", and the difference is not
+   pedantry. Supabase Realtime evaluates RLS when a subscription is
+   established and caches that result for the socket's lifetime, so a removed
+   member holding an **already-open subscription** can keep receiving new
+   messages until the socket drops. Any claim of instantaneous revocation would
+   be false on a live demo. Forcibly closing those channels on removal is the
+   fix, and it is on the verification list rather than assumed.
 3. **Memory audience is a snapshot at learn time, not current membership.**
    Someone who joins later was not present when the thing was said.
 4. **Memory visibility never widens automatically.** Broadening requires an
@@ -260,9 +324,18 @@ To be written against the finished build, from the running log in
 Known deliberate cuts so far:
 
 - **No knowledge graph.** `memory_nodes` / `memory_edges` were designed and then
-  cut. The core requirement is *scoped retrieval*, not graph traversal; graph
-  semantics would be introduced once a concrete product query justified the
-  complexity. Provisional pending research track R4.
+  cut, and the cut was tested rather than assumed. The bar set was: *name three
+  product queries a graph answers well and a flat relational table answers
+  badly.* One turned out to be answered **better** without a graph (single-hop
+  subject lookup — Mem0's own benchmark). One is real but is not a requirement of
+  this product (multi-hop provenance). One — temporal "how did this change" — is
+  genuinely where graphs win in the literature, and Quorum already answers it
+  relationally through the `superseded_by` chain. Looking for three and finding
+  one and a half is the argument for cutting.
+  **Reopen triggers, stated so the decision is falsifiable:** a product
+  requirement for branching provenance (a fact derived from two others, which
+  `superseded_by` cannot express), or a "trace this instruction back to who
+  authorised it" feature — plausible for a legal product.
 - **Gmail integration** is the first thing dropped if time runs short.
 - **The force-directed space view is scheduled last on purpose.** It is the most
   visually impressive piece and the least graded; a conventional list view ships

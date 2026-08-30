@@ -7,6 +7,8 @@ import {
   GATE,
   MEMORY,
   estimateCost,
+  TOOLS,
+  RESEARCH_TOOL,
   type ModelTier,
 } from '@/config';
 
@@ -95,8 +97,8 @@ describe('cost estimation', () => {
 
 describe('memory retrieval config', () => {
   it('ranking weights sum to exactly 1', () => {
-    const { similarity, recency, speakerPresence } = MEMORY.retrieval.weights;
-    expect(similarity + recency + speakerPresence).toBeCloseTo(1.0, 10);
+    const { relevance, recency, speakerPresence } = MEMORY.retrieval.weights;
+    expect(relevance + recency + speakerPresence).toBeCloseTo(1.0, 10);
   });
 
   it('caps a single subject well below the global budget', () => {
@@ -108,8 +110,8 @@ describe('memory retrieval config', () => {
   });
 
   it('keeps thresholds inside their valid ranges', () => {
-    expect(MEMORY.retrieval.similarityFloor).toBeGreaterThan(0);
-    expect(MEMORY.retrieval.similarityFloor).toBeLessThan(1);
+    expect(MEMORY.retrieval.relevanceFloor).toBeGreaterThan(0);
+    expect(MEMORY.retrieval.relevanceFloor).toBeLessThan(1);
     expect(MEMORY.extraction.confidenceThreshold).toBeGreaterThan(0);
     expect(MEMORY.extraction.confidenceThreshold).toBeLessThan(1);
   });
@@ -120,15 +122,39 @@ describe('memory retrieval config', () => {
 });
 
 describe('gate config', () => {
-  it('biases toward silence', () => {
-    // Failure modes are not symmetric: an over-quiet agent is a mild
-    // annoyance, an over-eager one is unusable.
-    expect(GATE.judgeSpeakThreshold).toBeGreaterThan(0.5);
-    expect(GATE.judgeSpeakThreshold).toBeLessThan(1);
+  it('uses a discrete verdict, never a thresholded confidence score', () => {
+    // R5: LLM self-reported confidence is not calibrated well enough to
+    // threshold on. A `judgeSpeakThreshold: 0.7` lived here and was theatre.
+    expect(GATE.judgeVerdicts).toEqual(['respond', 'silent']);
+    expect(GATE).not.toHaveProperty('judgeSpeakThreshold');
   });
 
   it('fails closed', () => {
-    expect(GATE.onJudgeFailure).toBe('stay_silent');
+    // Failure modes are not symmetric: an over-quiet agent is a mild
+    // annoyance, an over-eager one is unusable.
+    expect(GATE.onJudgeFailure).toBe('silent');
+    expect(GATE.judgeVerdicts).toContain(GATE.onJudgeFailure);
+  });
+});
+
+describe('tool budgets', () => {
+  it('no tool is budgeted for longer than the loop containing it', () => {
+    // `research` was set to 180s inside a 60s loop — one of the two numbers
+    // was dead code. It is now a separate user-invoked turn type.
+    for (const [name, cfg] of Object.entries(TOOLS.perTool)) {
+      expect(cfg.timeoutMs, `${name} exceeds the tool-loop wall clock`)
+        .toBeLessThanOrEqual(TOOLS.maxWallClockMs);
+    }
+  });
+
+  it('research finishes before its own model call times out', () => {
+    expect(RESEARCH_TOOL.timeoutMs).toBeLessThan(TIERS.reason.timeoutMs);
+  });
+
+  it('starts with an empty post-untrusted allowlist — fail closed', () => {
+    // Once a turn ingests untrusted tool content it may only call tools on
+    // this list. Empty means: no further tool calls at all.
+    expect(TOOLS.postUntrustedAllowlist).toEqual([]);
   });
 });
 

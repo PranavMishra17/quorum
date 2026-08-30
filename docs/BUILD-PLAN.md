@@ -101,6 +101,24 @@ artifacts**, not packaging.
   tab. Half of all auth bugs only appear this way.
 - Verify the isolation claims by hand, in the UI, as a second pair of eyes on
   the tests.
+- **Remove a member who has the chat open in another window and watch what
+  happens.** This is the single case most likely to contradict the README live:
+  Realtime evaluates RLS at subscribe time and caches it for the socket's
+  lifetime, so the removed member's already-open channel may keep delivering
+  messages. Either the channel is force-closed on removal, or assumption 2 is
+  restated. Do not discover this in front of a reviewer.
+
+> **Two scheduling corrections the research forced.**
+>
+> **Docker gets verified at hour 0, not hour 8.5.** The authorization suite needs
+> a real Postgres. Finding out that Docker is unavailable at hour 8.5 costs the
+> single most graded test file in the project.
+>
+> **The prompt-injection exfiltration surface is not a tier-3 concern.** The
+> rendered-link / auto-loading-image beacon channel lives in the message
+> rendering component built at hours 1–2.5, and fires with no agent and no tool
+> involved. Sanitising rendered output belongs in tier 1, next to the component,
+> not in the tools block.
 
 ---
 

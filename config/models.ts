@@ -44,12 +44,7 @@ export interface ModelSpec {
   supportsEffort: boolean;
 }
 
-/**
- * Prices are USD per million tokens, Anthropic first-party API rates.
- * TODO(verify): Haiku 4.5 `maxOutputTokens` is the one number here not taken
- * from a published table — confirm against `GET /v1/models/claude-haiku-4-5`
- * before relying on it for anything but a ceiling.
- */
+/** Prices are USD per million tokens, Anthropic first-party API rates. */
 export const MODELS = {
   'claude-opus-5': {
     id: 'claude-opus-5',
@@ -97,7 +92,14 @@ export interface TierConfig {
   stream: boolean;
   /** Hard ceiling on a single call, enforced by the provider wrapper. */
   timeoutMs: number;
-  /** Provider-wrapper retries. Kept low: the supplied key is rate-limited. */
+  /**
+   * TOTAL attempts beyond the first — not additive with the SDK's own default.
+   *
+   * The Anthropic SDK retries twice by default. If both layers retry, a
+   * rate-limited judge call burns three attempts against a 20s ceiling while
+   * this config claims one. `lib/llm/anthropic.ts` MUST construct the client
+   * with `maxRetries: 0` and own the retry policy here.
+   */
   maxRetries: number;
   description: string;
 }
@@ -153,7 +155,13 @@ export const TIERS = {
     thinking: { kind: 'adaptive', display: 'summarized' },
     maxTokens: 32_000,
     stream: true,
-    timeoutMs: 300_000,
+    /**
+     * Deliberately under the platform invocation ceiling. At 300_000 this
+     * consumed the entire Vercel budget, leaving nothing for the rest of the
+     * turn — and a function killed at the ceiling cancels its own deferred
+     * memory extraction.
+     */
+    timeoutMs: 240_000,
     maxRetries: 0,
     description:
       'Research synthesis and other deliberately deep work. User-invoked, never automatic.',

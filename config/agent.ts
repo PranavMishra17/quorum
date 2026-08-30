@@ -29,18 +29,25 @@ export const GATE = {
   judgeContextMessages: 8,
 
   /**
-   * The judge is biased toward silence. It must clear this confidence to
-   * speak. An agent that is quiet slightly too often is much better than one
-   * that interjects; the failure modes are not symmetric.
+   * The judge returns a DISCRETE verdict, not a confidence score.
+   *
+   * There was a `judgeSpeakThreshold: 0.7` here. Research R5 killed it: LLM
+   * self-reported confidence is not calibrated well enough to threshold on, so
+   * comparing a model-authored float to 0.7 is theatre dressed as rigour. It
+   * also contradicted the README, which already said "a verdict plus a one-line
+   * reason" — the prose was right and the config was wrong.
+   *
+   * Obtained via the API's structured-outputs surface (`output_config.format`),
+   * not a forced tool call. See D-020.
    */
-  judgeSpeakThreshold: 0.7,
+  judgeVerdicts: ['respond', 'silent'] as const,
 
   /**
    * Fail-closed default when the judge errors, times out, or returns junk.
    * Silence is the safe failure: the chat still works and the user can @ the
    * agent to force a response.
    */
-  onJudgeFailure: 'stay_silent',
+  onJudgeFailure: 'silent',
 
   /** Names the agent answers to. Matched case-insensitively, word-boundary. */
   mentionTokens: ['@quorum', '@agent', 'quorum'],
@@ -76,11 +83,19 @@ export const MEMORY = {
      * must not crowd out the other nineteen.
      */
     perSubjectCap: 3,
-    /** Cosine-similarity floor. Below this, an item is noise, not context. */
-    similarityFloor: 0.3,
+    /**
+     * Relevance floor. Below this, an item is noise, not context.
+     *
+     * NOTE: D-004 closed with NO vector provider in v1, so this scores
+     * `ts_rank` output (lexical), not cosine similarity. The number was chosen
+     * for a cosine scale and must be re-tuned against real `ts_rank` values
+     * before it means anything. Recorded here rather than silently carried over.
+     */
+    relevanceFloor: 0.3,
     /** Score weights. Must sum to 1.0 — asserted in tests. */
     weights: {
-      similarity: 0.6,
+      /** Lexical relevance in v1; semantic if D-004 is ever reopened. */
+      relevance: 0.6,
       recency: 0.2,
       /** Subject has spoken in the recent turns of this chat. */
       speakerPresence: 0.2,
@@ -151,24 +166,53 @@ export const CONTEXT = {
 export const TOOLS = {
   /** Hard cap on tool calls in one agent turn. Loop guard. */
   maxCallsPerTurn: 6,
-  /** Wall-clock ceiling for the whole tool loop. */
+  /** Wall-clock ceiling for the whole automatic tool loop. */
   maxWallClockMs: 60_000,
+
+  /**
+   * Every entry's `timeoutMs` must be <= `maxWallClockMs`. A tool budgeted for
+   * longer than the loop containing it means one of the two numbers is dead
+   * code — which is exactly what `research` was before R7/R9 caught it.
+   * Asserted in tests/config.test.ts.
+   */
   perTool: {
     web_search: { maxUses: 3, timeoutMs: 15_000 },
     web_fetch: { maxUses: 3, timeoutMs: 15_000, maxContentTokens: 8_000 },
     file_read: { maxUses: 5, timeoutMs: 10_000, maxBytes: 5_000_000 },
-    research: { maxSteps: 5, timeoutMs: 180_000 },
   },
+
   /**
-   * Content returned by a tool is UNTRUSTED DATA, never instructions. It is
-   * fenced with provenance before it reaches the model, and a tool result can
-   * never itself authorise a further privileged tool call.
-   * See research track R7 (prompt injection).
+   * Content returned by a tool is UNTRUSTED DATA, never instructions.
+   *
+   * The fence is provenance labelling, and labelling alone is NOT a defence —
+   * R7 is explicit that delimiting is defence-in-depth, not a mitigation. The
+   * actual structural control is `postUntrustedAllowlist` below, enforced in
+   * lib/agent/orchestrator.ts. Previously this comment claimed a tool result
+   * "can never authorise a further privileged call" while nothing enforced it.
    */
   untrustedContentFence: {
     open: '<untrusted_tool_content source="{source}">',
     close: '</untrusted_tool_content>',
   },
+
+  /**
+   * Least-privilege turn scoping (D-022). Once a turn has ingested untrusted
+   * tool content, it may only call tools on this allowlist for the rest of the
+   * turn. This is what makes the untrusted/trusted boundary structural rather
+   * than a request that the model behave.
+   */
+  postUntrustedAllowlist: [] as readonly string[],
+} as const;
+
+/**
+ * The research tool is USER-INVOKED and runs as its own turn type — it is not
+ * part of the automatic tool loop above, which is why its budget legitimately
+ * exceeds TOOLS.maxWallClockMs. Its ceiling must stay under
+ * TIERS.reason.timeoutMs so the model call is never the thing that dies first.
+ */
+export const RESEARCH_TOOL = {
+  maxSteps: 5,
+  timeoutMs: 180_000,
 } as const;
 
 // ---------------------------------------------------------------------------

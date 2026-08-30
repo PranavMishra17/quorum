@@ -12,6 +12,7 @@ export default defineConfig({
      * possible kind of flake to have in this project.
      */
     fileParallelism: false,
+    globalSetup: ['tests/global-setup.ts'],
     setupFiles: ['tests/setup.ts'],
     testTimeout: 20_000,
   },

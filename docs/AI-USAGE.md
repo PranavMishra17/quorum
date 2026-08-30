@@ -133,6 +133,70 @@ as an unprivileged role, and no test requiring a live model call — are
 constraints I set, and both exist for reasons specific to this project rather
 than as general good practice.
 
+### Session 4 — research, and the model auditing my own documents
+
+**Mine.** The research plan itself — 16 tracks in three bands, each required to
+name the decision it closes. The rule that **every report must end with the
+strongest argument against its own recommendation**, because a report that only
+supports its conclusion is confirmation, not research. And the orchestration
+design: Sonnet does the legwork at effort graded by band, Opus is reserved for
+two synthesis agents, and the highest-priority instruction given to the Band A
+synthesiser was *"list what the research shows is wrong in README.md and
+ARCHITECTURE.md."*
+
+That last instruction is the point. It is cheap to use a model to generate
+supporting material for a design you have already committed to. It is more useful
+to point it at your own documents and ask what is false.
+
+**AI-generated.** 16 research reports and 2 syntheses (~53,000 words, 18 agents,
+2.1M tokens, zero failures).
+
+**What it found — the reason this was worth doing.** Six defects in work I had
+already written and was satisfied with:
+
+| Found | Severity |
+|---|---|
+| README and ARCHITECTURE both said `ScopedAgentContext` "resolves **and holds**" the member set. Holding authorisation state across the model call **is** the TOCTOU gap. The docs instructed an implementer to build the exact bug the project claims not to have. | **Critical** |
+| README: "Policies **deny** the authenticated role outright." Postgres has no deny policy. The outcome described was right, the mechanism named does not exist — and any interviewer who knows RLS would catch it. | High |
+| README promised **semantic similarity** ranking. D-004 closed against wiring an embedding provider, so the shipped system would not have had it. An unmarked overclaim in the section a reviewer reads most closely. | High |
+| Assumption 2 — "removed members lose access **from the moment of removal**" — is false as written. Realtime caches its RLS evaluation for the socket's lifetime, so a removed member with an open subscription keeps receiving messages. It would have failed live, on stage. | High |
+| `config/agent.ts` budgeted the research tool at 180s inside a 60s tool loop. One of the two numbers was dead code. | Medium |
+| `config/models.ts` set the deepest tier's timeout to exactly the platform invocation ceiling, leaving zero budget for the rest of the turn — and a function killed at the ceiling cancels its own deferred memory extraction. | Medium |
+
+It also killed `judgeSpeakThreshold: 0.7`. LLM self-reported confidence is not
+calibrated well enough to threshold on, so comparing a model-authored float to
+0.7 was theatre. The README had said "a verdict plus a one-line reason" all
+along — the prose was right and the config was wrong.
+
+**How I checked it.** Not by trusting it.
+
+- Every correction was checked against the primary source the report cited
+  before I applied it. Where a report's *conclusion* survived but its
+  *mechanism* did not — R5 recommended a forced tool call for the judge, which
+  is superseded by structured outputs — I took the conclusion and rejected the
+  mechanism.
+- **I did not accept the graph cut just because it agreed with me.** D-007 was
+  already leaning "cut", which is exactly when a confirming report is least
+  trustworthy. What made it acceptable was that R4 tested a falsifiable bar —
+  name three product queries a graph answers better — and reported finding one
+  and a half, with the counter-evidence (Mem0ᵍ and Zep's temporal benchmarks)
+  stated against itself. I also recorded that those numbers are **vendor
+  self-benchmarks in both directions**, which is why D-007's rationale is logged
+  at medium confidence even though its verdict is high.
+- Where reports disagreed, I read both and ruled. R2 and R14 conflicted on
+  whether to wrap a turn in one long transaction; R2 won on evidence, and R14's
+  recommendation is narrowed rather than discarded.
+- Five questions the research **could not** close are recorded as such in
+  `DECISIONS.md` rather than papered over — including one (whether `auth.uid()`
+  survives a `SECURITY DEFINER` role switch) that the entire membership-predicate
+  design rests on, and which R1 honestly flagged it could not source. It is now
+  scheduled as the first assertion in the RLS suite.
+- Every config change is pinned by a new assertion in `tests/config.test.ts`
+  (38 passing, up from 35), so the same mistakes cannot come back quietly.
+
+**The honest summary.** The design survived. The *documentation of the design*
+did not, and the gap between those two is where a take-home is actually lost.
+
 ---
 
 ## Sessions to come

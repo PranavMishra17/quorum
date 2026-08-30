@@ -56,7 +56,7 @@ chat_members          chat_id, user_id, role ('admin'|'member'),
 messages              id, chat_id, sender_type ('user'|'agent'), sender_id nullable,
                       content, client_message_id (idempotency), created_at
 memory_items          id, subject_user_id, origin_chat_id, origin_message_id,
-                      content, embedding vector, clearance_level int,
+                      content, search_vector tsvector, clearance_level int,
                       source_type ('stated'|'inferred'), confidence,
                       status ('candidate'|'active'|'superseded'|'stale'),
                       superseded_by, created_at, expires_at
@@ -92,10 +92,25 @@ chat_members   (user_id, status)
 chat_members   (chat_id, status)
 agent_events   (chat_id, created_at desc)
 memory_items   (subject_user_id, status)
-memory_items   USING ivfflat (embedding vector_cosine_ops)   -- or hnsw, see R3
+memory_items   USING gin (search_vector)                      -- lexical rank, D-004
 memory_audience(memory_item_id)
-messages       (chat_id, client_message_id) UNIQUE            -- idempotency, see R8
+messages       (chat_id, client_message_id) UNIQUE            -- idempotency, D-011
 ```
+
+**No `embedding` column and no ANN index in v1.** D-004 closed against wiring an
+embedding provider — Anthropic ships none, and a second vendor was not worth the
+cost for a candidate set the authorisation filter has already cut to tens of
+items. `lib/memory/embed.ts` is an unimplemented interface so the upgrade stays a
+one-file change. If vectors are ever adopted: HNSW, never ivfflat (`lists =
+rows/1000` degenerates to 1 at this scale), and carry an `embedding_model` column
+alongside so a provider swap is detectable rather than silently wrong.
+
+**Episodic and semantic.** `messages` and `agent_events` are the episodic
+layer — what happened, in order. `memory_items` is the semantic layer distilled
+from it. The distinction is worth naming because it explains why memory is
+extracted rather than simply retrieved: the episodic record is already complete
+and already authorised, and the semantic layer exists to make it *usable* across
+conversations, which is precisely what creates the authorisation problem.
 
 ### Chat types
 
@@ -114,19 +129,35 @@ assumption 1 in the README.
 
 ```
 message received (route handler)
-  ├─ idempotency check on client_message_id            → duplicate? return existing turn
+  ├─ idempotency check on client_message_id            → duplicate message? return existing turn
   ├─ persist message
-  ├─ build ScopedAgentContext(chat_id)                 → member set, clearance, actor
+  ├─ build ScopedAgentContext(chat_id)                 → fixes identity: chat, actor, turn_id
   ├─ rate limit check
   ├─ gate evaluation                    event: gate_evaluated
   │    └─ silent? stop here. The event is still written.
   ├─ retrieve memory (filter → rank → cap)   event: memory_retrieved {kept, filtered_out}
+  │    └─ membership + clearance re-read HERE, in SQL. Not cached from construction.
   ├─ assemble context within token budget    event: context_dropped (if trimmed)
-  ├─ model call, streamed                    row:   llm_calls
+  ├─ write llm_calls row  ─────────────────  BEFORE the call, not after
+  ├─ model call, streamed                    row:   llm_calls (updated with usage)
   ├─ tool loop, bounded                      events: tool_invoked, tool_result
+  │    └─ after untrusted content: tools restricted to postUntrustedAllowlist
   ├─ persist agent message
   └─ deferred: extract memory                events: memory_written, memory_conflict
 ```
+
+Two things this diagram is deliberately explicit about.
+
+**`llm_calls` is written before the model call, not after.** A row written after
+the fact is lost precisely when it matters most — a crash or timeout mid-call
+still spent money, and an accounting system that only records successes
+understates the bill in exactly the failure cases you most want to see.
+
+**Idempotency here covers a duplicate *message*, not a duplicate *turn*.** A
+retry arriving after the message was persisted but before the reply was — where
+the model call already succeeded and was already billed — is **out of scope for
+v1**, and is stated as a limitation rather than left looking like an oversight.
+See D-011, whose resume semantics remain open.
 
 Every step writes to `agent_events`. Extraction runs *after* the response is
 delivered — it keeps the user-visible turn fast and off the serverless timeout
@@ -155,7 +186,7 @@ event and the chat stays usable. A broken agent must never take the chat down.
 |---|---|---|---|
 | `browser.ts` | t1 | Publishable-key client for client components | Never sees a secret. RLS is the guard. |
 | `server.ts` | t1 | Session-bound client for route handlers and RSC | Acts *as the user*. RLS applies. |
-| `scoped-agent.ts` | t2 | `ScopedAgentContext` — the agent's entire world | The only file permitted to read `SUPABASE_SECRET_KEY`. Constructed per turn from a chat id; resolves member set + clearance + actor; every read method applies both authorisation axes in SQL. |
+| `scoped-agent.ts` | t2 | `ScopedAgentContext` — the agent's entire world | The only file permitted to read `SUPABASE_SECRET_KEY`. Fixes turn identity (chat, actor, `turn_id`) at construction. **Does not cache membership or clearance** — those are re-read in SQL on every privileged call, because holding them across the model call is the TOCTOU gap (D-009). |
 | `types.ts` | t1 | Generated Supabase types | `pnpm supabase gen types` output. Regenerate, never hand-edit. |
 
 ### `lib/memory/`
@@ -192,10 +223,25 @@ interface Tool<I, O> {
 }
 ```
 
-Note the signature: `execute` cannot reach the database except through `ctx`.
-Tool authorisation is therefore resource-level by construction — permission to
-*invoke* a tool is not permission to reach every resource that tool could touch.
-That distinction is research track R6.
+A signature expresses intent; it does not enforce it. Nothing here stops a tool
+module importing `lib/db/server.ts` and constructing its own client — that is
+what `scripts/check-boundaries.mjs` is for, and even that is a build failure
+rather than a security control.
+
+What makes this capability-style rather than ambient authority is a **stated,
+tested invariant**, not the type:
+
+> **No `ScopedAgentContext` method accepts a scope-defining id as a parameter.**
+> No `chat_id`, no other user's id. Scope comes from the context's construction
+> and nowhere else.
+
+The invariant is what carries the weight. Tool input is transitively
+model-controlled, so it is injection-influenceable; a method taking a `chat_id`
+from tool input would let a crafted document redirect the agent's reads, and the
+context would have degraded into ambient authority with extra steps. The
+distinction — permission to *invoke* a tool is not permission to reach every
+resource that tool could touch — is research track R6, and the seam table in §5
+inherits authorisation from `ctx` **only under this invariant**.
 
 ### `lib/llm/`
 

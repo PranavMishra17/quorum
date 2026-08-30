@@ -12,3 +12,7 @@ import { config } from 'dotenv';
  * the `lib/llm/provider.ts` boundary, never called for real in tests.
  */
 config({ path: '.env.local', quiet: true });
+
+// The "authorization suites were skipped" warning lives in global-setup.ts,
+// which runs once and writes to stderr directly — Vitest swallows console
+// output from per-file setup like this one.

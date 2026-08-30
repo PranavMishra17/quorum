@@ -45,3 +45,5 @@ next-env.d.ts
 
 # research working files
 research/reports/*.draft.md
+
+.claude*

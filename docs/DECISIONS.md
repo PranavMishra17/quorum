@@ -16,14 +16,19 @@ Format per entry: **Context → Decision → Why → Status → Revisit if**.
 | D-001 | Next.js + Supabase + Vercel, one language end to end | settled |
 | D-002 | One `chats` table with a `type` discriminator | settled |
 | D-003 | Authorisation is two independent axes | settled |
-| D-004 | Embedding provider | **OPEN** — blocks memory ranking |
+| D-004 | Embedding provider | **CLOSED** by R3 — no vectors in v1 |
 | D-005 | Memory surfacing rule: audience containment AND clearance floor | settled |
 | D-006 | Audience is a learn-time snapshot | settled |
-| D-007 | Graph memory (`memory_nodes`/`memory_edges`) | **OPEN** — provisionally cut |
+| D-007 | Graph memory (`memory_nodes`/`memory_edges`) | **CLOSED** by R4 — cut confirmed |
 | D-008 | Hybrid response gate, biased toward silence | settled |
-| D-009 | Authorisation consistency mid-turn (TOCTOU) | **OPEN** |
+| D-009 | Authorisation consistency mid-turn (TOCTOU) | **CLOSED** by R2 — re-read per privileged call |
 | D-010 | Model selection by purpose, not by model id | settled |
-| D-011 | Agent-turn idempotency | **OPEN** |
+| D-011 | Agent-turn idempotency | **PARTIAL** — shape closed, resume semantics OPEN |
+| D-019 | Agent tool authority is chat-scoped | settled (new, from R6) |
+| D-020 | Judge returns a discrete verdict, not a thresholded float | settled (new, from R5) |
+| D-021 | No memory reflection/consolidation step in v1 | settled (new, from R4) |
+| D-022 | Least-privilege turn scoping after untrusted content | settled (new, from R7) |
+| D-023 | Clearance ladder ordering | **OPEN** — blocks the seed migration |
 | D-012 | Removed members lose access to history | settled (assumption) |
 | D-013 | Memory extraction is deferred, never inline | settled |
 | D-014 | Conflict resolution is deterministic, never delegated to the model | settled |
@@ -90,13 +95,36 @@ embeddings. **Anthropic does not ship an embeddings API.** The spec assumed a
 2. A local/edge model (no key, but bundle size and cold starts on serverless).
 3. Postgres full-text search + recency, no vectors at all.
 
-**Leaning.** Option 3 as the tier-1 fallback with option 1 behind
-`lib/memory/embed.ts` as an interface, so ranking can be upgraded without
-touching the filter. **The filter does not depend on this** — authorisation is
-set containment and an integer comparison, and stays correct with any ranker.
-That containment is what makes this decision deferrable rather than blocking.
+**Ruling (closed by R3).** **Option 3.** No embedding provider is wired into v1.
+The rank step scores an already-authorised candidate set on `ts_rank` (lexical)
+plus recency plus speaker presence. `lib/memory/embed.ts` ships as an
+unimplemented interface. No ANN index in v1.
 
-**Status.** OPEN. → research **R3**.
+**Why.** The authorisation filter reduces the candidate set to tens of items
+before ranking ever runs, so the marginal value of semantic ranking is far lower
+here than the large-corpus benchmarks that motivate it. Against that: a second
+vendor, a second key, a re-embedding migration path, and ~1h of the 12. **The
+filter does not depend on the ranker** — authorisation is an anti-join plus an
+integer comparison and stays correct under any ranking — which is exactly what
+makes this deferrable rather than blocking.
+
+**If reopened.** Voyage AI (Anthropic's own documented recommendation; 200M free
+tokens). **HNSW, never ivfflat** — pgvector's `lists = rows/1000` degenerates to
+1 at this scale, and Supabase's docs name HNSW the default. Carry an
+`embedding_model` column beside `embedding` so a provider swap is detectable
+rather than silently wrong.
+
+**The strongest argument against.** Lexical matching finds lexemes, not meaning.
+This is a legal product, and "Delaware governing law" vs "the client's
+choice-of-law clause" is precisely the paraphrase gap embeddings exist to close.
+R3 also concedes that **no source measures FTS-vs-embedding quality at the small
+post-filter candidate-set size Quorum actually operates in** — the ruling rests
+on extrapolating from large-corpus benchmarks downward, which is an argument, not
+a measurement. The ~30-minute experiment that would settle it (run the demo
+fixtures through both, see which surfaces the right item) is named in R3 and was
+not run.
+
+**Status.** CLOSED. → [R3](../research/reports/R3-embeddings-vectors.md).
 
 ---
 
@@ -146,9 +174,35 @@ kept the first version relational, because the core requirement is scoped
 retrieval, not graph traversal. I would introduce graph semantics once a
 concrete product query justified the complexity."*
 
-**Status.** OPEN by explicit instruction — the cut is only confirmed if research
-**R4** substantiates it, or reopened if R4 produces a concrete product query
-that relational retrieval answers badly.
+**Ruling (closed by R4).** **Cut confirmed.** Ship `memory_items` +
+`memory_audience`, purely relational.
+
+**Why — the cut was tested, not conceded.** The bar was: name three product
+queries a graph answers well and a flat relational table answers badly.
+
+| Candidate query | Verdict |
+|---|---|
+| Single-hop "what do we know about X" | Relational **wins** — Mem0's own benchmark |
+| Multi-hop provenance / lineage | Real in the abstract, **not a requirement of this product** |
+| Temporal "how did this change over time" | The one case graphs genuinely win — and Quorum already answers it via the `superseded_by` chain |
+
+Looking for three and finding one and a half is the argument.
+
+**The strongest argument against.** The same evidence shows graphs winning
+specifically on temporal and branching multi-hop reasoning (Mem0ᵍ +2.6 temporal
+J-score; Zep up to 18.5% on temporal/cross-session). And `superseded_by` only
+models **linear** supersession — a fact derived from two others, or a branching
+provenance question, is a real ceiling, not a hypothetical one. A legal product
+is unusually likely to eventually want "trace this instruction back to who
+authorised it." Note also that R4's decisive numbers are **vendor
+self-benchmarks in both directions**, which is a reason to hold the verdict with
+medium rather than high confidence in its *rationale* even where the *decision*
+is clear.
+
+**Reopen triggers.** A requirement for branching provenance, or an
+authorisation-trace feature.
+
+**Status.** CLOSED. → [R4](../research/reports/R4-memory-architecture.md).
 
 ---
 
@@ -176,11 +230,37 @@ time-of-check/time-of-use.
 "what happens if membership changes during a turn?" is an obvious interview
 question against this design.
 
-**Candidate answers.** (a) Snapshot at turn start and accept the staleness
-window; (b) re-check before each privileged read; (c) run the turn in a single
-transaction at a defined isolation level.
+**Ruling (closed by R2).** A refinement of (b). **Turn *identity* — chat, actor,
+`turn_id` — is fixed once at construction. Every privileged read of mutable
+authorisation state (membership, clearance, audience containment) is evaluated
+fresh, in SQL, at the moment that read runs.**
 
-**Status.** OPEN. → research **R2**.
+**Why.** This is very nearly free: PostgREST already gives each call its own
+transaction, so the work is *not caching* rather than building machinery.
+Candidate (c) — one long `REPEATABLE READ` transaction around the turn — is
+rejected on two counts: it is infeasible under PostgREST's per-request
+transaction model, and it is actively harmful, because holding a database
+transaction open across a multi-second external LLM call is a documented
+anti-pattern that fights Supavisor's transaction-mode pooling by design.
+`REPEATABLE READ` RPCs are still right for *short, DB-only atomic writes* — the
+idempotent insert, and the `memory_item` + `memory_audience` pair.
+
+**Published guarantee.** *A revocation takes effect on the agent's next
+privileged read.* Not "the next turn" — that is weaker than what this design
+actually delivers.
+
+**The strongest argument against.** Per-read re-checking **shrinks the TOCTOU
+window; it does not close it.** A response already generated from data read
+moments before a revocation lands is still delivered, because nothing in this
+stack can make the model call itself transactional. "Next read" is not "no
+window." There is also a documentation cost: a context that visibly *holds* its
+state is an easier mental model than one that deliberately refuses to.
+
+**Consequence.** This corrected the README and `ARCHITECTURE.md`, both of which
+said the context "resolves **and holds**" the member set — wording that
+instructed an implementer to build the exact gap this project claims not to have.
+
+**Status.** CLOSED. → [R2](../research/reports/R2-authz-concurrency.md).
 
 ---
 
@@ -211,7 +291,29 @@ rather than chasing exactly-once. Concretely: a `client_message_id` supplied by
 the client with a unique constraint on `(chat_id, client_message_id)`, and a
 `turn_id` that makes a replayed turn recognisable.
 
-**Status.** OPEN. → research **R8**.
+**Ruling (partially closed by R8).** **Shape settled:** client-generated
+`client_message_id`, a permanent `UNIQUE (chat_id, client_message_id)`,
+`turn_id` for correlation, at-least-once delivery. **No distributed lock, no
+transactional outbox** — both are over-engineering at this scale. The
+`llm_calls` row is written **before** the model call, so a crash mid-call is
+still accounted for.
+
+**Still OPEN: partial-turn resume semantics.** The case where a retry arrives
+after the message was persisted but before the reply was — the model call has
+already succeeded and already been billed. R8 offers two disjoint strategies (a
+durable step record vs. an explicit `turn` state machine) and finds authority for
+neither in the multi-table single-Postgres case.
+
+**Decision for v1:** partial-turn recovery is **out of scope**, and
+`ARCHITECTURE.md` says so explicitly rather than showing only the happy path.
+
+**What would close it.** `tests/agent/turn-idempotency.test.ts`: persist a
+message, fail the reply insert *after* the model call succeeds, retry the same
+`client_message_id`, assert exactly one `llm_calls` row for that `turn_id` and
+exactly one agent reply. Until that passes, this is "design settled,
+implementation unverified" — and it should be described that way, not as done.
+
+**Status.** PARTIAL. → [R8](../research/reports/R8-idempotency.md).
 
 ---
 
@@ -288,3 +390,137 @@ creates the table. Never a follow-up.
 **Why.** A table that exists without a policy for even one deploy is fully
 readable via the publishable key, which is in the browser bundle. Coupling them
 in one file removes the window entirely.
+
+---
+
+## D-019 — Agent tool authority is chat-scoped
+
+**Context.** In a group chat, whose permissions does the agent act with? The
+union of all members', the intersection, or the invoking user's? These give
+materially different answers and the design had never stated which.
+
+**Decision.** **Neither union nor intersection: the chat's own.** A turn's
+effective authority is exactly the chat's active member set and its clearance
+floor — which is precisely what `ScopedAgentContext` already resolves from
+`chat_id`. Paired with the tested invariant that **no context method accepts a
+scope-defining id as a parameter**, since tool input is transitively
+model-controlled and therefore injection-influenceable.
+
+**Why.** Union leaks: the agent would answer using a fact only one member is
+cleared for. Intersection is unusable: in a twelve-person chat it collapses to
+near-nothing. Chat-scoped is also the only one of the three that composes with
+the memory rule, which is already stated in terms of the chat's member set.
+
+**Against.** It cannot distinguish admin from ordinary member within one chat.
+A future admin-only tool needs a per-member role check *in addition*. Also, R6
+found **no comparable published system** for this multi-member-chat case — the
+delegation literature covers single-user delegation. This is Quorum's own
+extrapolation, and should be presented that way.
+
+---
+
+## D-020 — The judge returns a discrete verdict, not a thresholded float
+
+**Context.** `config/agent.ts` had `judgeSpeakThreshold: 0.7`, compared against a
+model-reported confidence.
+
+**Decision.** **Killed.** The judge returns `respond | silent` plus a one-line
+reason, via the API's structured-outputs surface (`output_config.format`).
+
+**Why.** LLM self-reported confidence is not calibrated well enough to threshold
+on; comparing a model-authored float to 0.7 is theatre dressed as rigour. The
+README already said "a verdict plus a one-line reason" — the prose was right and
+the config was wrong, so the config changed.
+
+**Against.** A discrete verdict discards gradient information and forecloses
+cheap later tuning (a different bar for DMs than for large groups). A
+score-plus-verdict hybrid — gate on the discrete field, log the score for future
+calibration — would keep both. The all-discrete choice is a 12-hour-budget
+simplification, not strictly better.
+
+**Note.** R5 recommended a *forced tool call* as the mechanism. That is dated;
+structured outputs are the current surface. The conclusion survived, the
+mechanism did not.
+
+---
+
+## D-021 — No memory reflection or consolidation in v1
+
+**Decision.** A named **non-goal**. `MEMORY.lifecycle` decays and supersedes; it
+does not merge related facts into higher-order summaries.
+
+**Why.** Consolidation is where memory systems get expensive and unpredictable,
+and it is not on the path to anything the brief asks for. Naming it as a
+deliberate non-goal is better than leaving it looking unconsidered.
+
+---
+
+## D-022 — Least-privilege turn scoping after untrusted content
+
+**Context.** The file and web tools introduce attacker-controlled text into the
+model's context. `config/agent.ts` carried a comment asserting that a tool result
+"can never authorise a further privileged call" — enforced nowhere.
+
+**Decision.** Make it real. **Once a turn has ingested untrusted tool content, it
+may only call tools on `TOOLS.postUntrustedAllowlist` for the remainder of that
+turn.** The list starts empty: no further tool calls at all. Enforced in
+`lib/agent/orchestrator.ts`, asserted in `tests/config.test.ts`.
+
+**Why.** Delimiting and provenance-fencing untrusted content is defence in depth,
+not a mitigation — the evidence does not support treating a fence as a control.
+The structural version is to remove the *capability*, which is the same move the
+memory rule makes: prevent rather than persuade.
+
+**Against.** It makes legitimate multi-step research harder — read a page, then
+search again — which is why `research` is a separate user-invoked turn type
+rather than something the automatic loop does.
+
+---
+
+## D-023 — Clearance ladder ordering — **OPEN**
+
+**Context.** `config/agent.ts` orders `general(0) → internal(1) →
+external_audit(2) → internal_exec(3)`, and the comparison is a monotone
+`have.level >= required.level`.
+
+**The problem.** `external_audit` names **who is in the room**. The other three
+name **how sensitive the material is**. Those are different dimensions, and one
+integer cannot express both. As ordered, a fact marked `internal` (1) is eligible
+to surface in an `external_audit` chat (2) whenever audience containment happens
+to hold — an internal fact reaching a room with outsiders in it. Containment
+usually blocks this, but relying on the second axis to rescue a mis-modelled
+first axis is not the design the README describes.
+
+**Options.** (a) Reorder into pure sensitivity rungs — `general` / `internal` /
+`restricted` / `exec` — and model "external parties present" as a **chat
+attribute**, which is what it actually is. (b) Keep the current keys and state
+explicitly that the ladder is a sensitivity ordering in which `external_audit`
+sits where it does *because of what may be disclosed to auditors*.
+
+**Status.** OPEN, and **blocking `0008_seed_clearances.sql`** — migrations are
+append-only, so this must be decided before it is written, not after.
+
+---
+
+## Known limits that research could not close
+
+Recorded here rather than left to look like oversights.
+
+- **Fabricated-but-authorised memory.** `source_type` defends against
+  *misattribution*, not *fabrication*. A user asserting a false claim about a
+  colleague produces a correctly-authorised `inferred` item that is eligible to
+  surface. Not closable within this budget; stated as a limitation.
+- **Aggregation across separately-authorised answers.** Two individually
+  authorised answers in one chat can let a human infer a third, unauthorised
+  fact. No system surveyed claims to solve this; the literature names it open.
+- **Whether `auth.uid()` survives a `SECURITY DEFINER` role switch.** R1 could
+  not find this stated verbatim in a primary source — it is inferred from two
+  documented facts. **The entire membership-predicate design rests on it.** It is
+  cheap to settle and must be the *first* assertion in
+  `tests/authorization/rls.test.ts`.
+- **`GATE.judgeContextMessages: 8`.** No source gives a principled number. Not
+  contradicted; also not derived. Describe it as chosen, not derived.
+- **The false-positive/false-negative asymmetry behind D-008.** The direction is
+  asserted across the proactive-agent literature; the magnitude is quantified
+  nowhere. State bias-toward-silence as a design *stance*, not a measured
+  tradeoff.
