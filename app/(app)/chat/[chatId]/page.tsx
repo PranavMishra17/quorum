@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { createClient, requireActor } from '@/lib/db/server';
 import { ChatSurface, type UiMessage } from '@/app/_components/chat-surface';
 import { InternalView, type EventRow, type CallRow } from '@/app/_components/internal-view';
+import { Roster, type RosterMember } from '@/app/_components/roster';
 
 /**
  * A chat.
@@ -37,11 +38,12 @@ export default async function ChatPage({
       .eq('chat_id', chatId)
       .order('created_at', { ascending: true })
       .limit(200),
+    // No status filter: admins need to see pending requests, and RLS already
+    // decides which rows are visible at all.
     supabase
       .from('chat_members')
-      .select('user_id, role, profiles:user_id(display_name, color)')
-      .eq('chat_id', chatId)
-      .eq('status', 'member'),
+      .select('user_id, role, status, profiles:user_id(display_name, color)')
+      .eq('chat_id', chatId),
   ]);
 
   // A readable chat row with an unreadable roster means discovery-only access:
@@ -49,15 +51,27 @@ export default async function ChatPage({
   // Cast through unknown: without the Database generic, supabase-js infers
   // embedded relations as arrays regardless of cardinality.
   const roster = (members ?? []) as unknown as {
-    user_id: string; role: string;
+    user_id: string; role: 'admin' | 'member'; status: RosterMember['status'];
     profiles: { display_name: string; color: string } | null;
   }[];
-  const amMember = roster.some((m) => m.user_id === actor.id);
+  const me = roster.find((m) => m.user_id === actor.id);
+  const amMember = me?.status === 'member';
+  const amAdmin = amMember && me?.role === 'admin';
 
   const people: Record<string, { name: string; color: string }> = {};
   for (const m of roster) {
-    if (m.profiles) people[m.user_id] = { name: m.profiles.display_name, color: m.profiles.color };
+    if (m.profiles && m.status === 'member') {
+      people[m.user_id] = { name: m.profiles.display_name, color: m.profiles.color };
+    }
   }
+
+  const rosterMembers: RosterMember[] = roster.map((m) => ({
+    userId: m.user_id,
+    name: m.profiles?.display_name ?? 'Someone',
+    color: m.profiles?.color ?? 'var(--agent)',
+    role: m.role,
+    status: m.status,
+  }));
 
   const chatRow = chat as unknown as {
     id: string; type: 'dm' | 'group' | 'agent'; name: string | null;
@@ -126,7 +140,7 @@ export default async function ChatPage({
             {chatRow.name ?? (chatRow.type === 'dm' ? 'Direct message' : 'Chat')}
           </h1>
           <p className="mt-0.5 truncate text-xs text-muted">
-            {roster.map((m) => m.profiles?.display_name ?? '…').join(', ')}
+            {rosterMembers.filter((m) => m.status === 'member').map((m) => m.name).join(', ')}
           </p>
         </div>
         <span className="shrink-0 rounded bg-accent-soft px-2 py-0.5 text-[10px] uppercase tracking-wide text-accent">
@@ -134,12 +148,21 @@ export default async function ChatPage({
         </span>
       </div>
 
-      <ChatSurface
-        chatId={chatId}
-        meId={actor.id}
-        initialMessages={initial}
-        people={people}
-      />
+      <div className="grid gap-4 lg:grid-cols-[1fr_16rem]">
+        <ChatSurface
+          chatId={chatId}
+          meId={actor.id}
+          initialMessages={initial}
+          people={people}
+        />
+        <Roster
+          chatId={chatId}
+          meId={actor.id}
+          members={rosterMembers}
+          amAdmin={Boolean(amAdmin)}
+          chatType={chatRow.type}
+        />
+      </div>
 
       <InternalView
         chatId={chatId}

@@ -10,15 +10,15 @@ commit as the work it describes, so it is never stale. Detail lives in
 
 ```
 PHASE 1  MVP · submittable                    ███████████████░  ~90%
-PHASE 2  Memory + agent depth + polish        ███████████████░  ~90%   ← WE ARE HERE
-PHASE 3  Tools, capability, polish, submit    ░░░░░░░░░░░░░░░░    0%
+PHASE 2  Memory + agent depth + polish        ████████████████  100%
+PHASE 3  Tools, capability, polish, submit    ░░░░░░░░░░░░░░░░    0%   ← WE ARE HERE
 ```
 
 **Right now:** Phase 2. A sanity check against `docs/ARCHITECTURE.md` found one
 genuine Phase 1 miss — chat creation — plus four items that were in the fan-out
 but never in this plan. All are listed below rather than quietly absorbed.
 
-**Immediately next:** a roster UI for the members route, then Phase 3 — tools.
+**Immediately next:** Phase 3 — the file tool first, since it is the cheapest one and it proves resource-level authorisation.
 
 > Phase 2 shows progress already because the memory *schema* and its isolation
 > tests landed with the migrations. That was deliberate: the schema is one
@@ -136,7 +136,7 @@ appropriately; a non-member gets nothing. Submittable.
 | ✅ | Untrusted-turn policy → `inferred` + `candidate` (**T10**) | applied after the model speaks, so phrasing cannot evade it |
 | ✅ | `lib/memory/conflict.ts` — deterministic, never the model (D-014) | 13 assertions; model detects, code decides |
 | ✅ | `ScopedAgentContext` re-reads authz per call (**T2**, D-009) | 18 assertions, negative-controlled |
-| 🟡 | Group admin UI | the route is done and RLS-tested; the roster UI is not built |
+| ✅ | Group admin UI | roster with promote/remove/approve/leave; buttons are UX, RLS refuses |
 | ✅ | Realtime revocation broadcast (**T11**) | narrows the window; documented as cooperative, not enforcement |
 | ✅ | **Agent internal view** — the single best demo artifact | shows withheld counts, phrased for a reviewer |
 | ✅ | Token + cost accounting per chat and globally | RLS-scoped; no cross-chat admin view by design |
