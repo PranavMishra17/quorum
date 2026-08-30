@@ -2,6 +2,7 @@ import { after, NextResponse, type NextRequest } from 'next/server';
 import { randomUUID } from 'node:crypto';
 import { createClient, requireActor, NotAuthenticatedError } from '@/lib/db/server';
 import { runTurn } from '@/lib/agent/orchestrator';
+import { parseResearchCommand, runResearchTurn } from '@/lib/agent/research';
 
 /**
  * Send a message, then run the agent turn.
@@ -22,7 +23,21 @@ import { runTurn } from '@/lib/agent/orchestrator';
  *    serverless timeout cliff.
  */
 
-export const maxDuration = 60;
+/**
+ * The agent turn runs in `after()`, and `after()` work counts toward this
+ * function's duration — so this number is the real ceiling on a turn, not a
+ * formality. It was 60 while `TIERS.reason.timeoutMs` was 240 and the research
+ * budget 180, which meant both were budgets for a container four times larger
+ * than the one they ran in.
+ *
+ * It is a LITERAL and not `PLATFORM.turnRouteMaxDurationSeconds`, because Next
+ * reads route segment config statically and rejects an imported expression
+ * ("Invalid segment configuration export detected") — which the build says
+ * plainly, and which is the only reason this is duplicated. `tests/config.test.ts`
+ * asserts the literal here equals the config value, so the duplication cannot
+ * drift.
+ */
+export const maxDuration = 300;
 
 export async function POST(
   request: NextRequest,
@@ -94,8 +109,25 @@ export async function POST(
   // already running or already finished.
   if (!row.is_duplicate) {
     const requestId = randomUUID();
+    // `/research <question>` runs a different, more expensive turn type: the
+    // gate is bypassed (asking directly is the clearest possible request for a
+    // reply) and the step budget is larger. Everything else — the rate limit,
+    // the tool bounds, D-022 — is shared, because a second turn type with its
+    // own copies of those would be a second place for them to drift.
+    const research = parseResearchCommand(content);
     after(async () => {
       try {
+        if (research) {
+          await runResearchTurn({
+            chatId,
+            actorId,
+            turnId: row.turn_id,
+            requestId,
+            messageId: row.message_id,
+            question: research,
+          });
+          return;
+        }
         await runTurn({
           chatId,
           actorId,

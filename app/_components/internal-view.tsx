@@ -156,20 +156,28 @@ function summarise(events: EventRow[], calls: CallRow[]) {
 
 function Turn({ turn }: { turn: TurnView }) {
   const gate = turn.events.find((e) => e.event_type === 'gate_evaluated');
-  const verdict = gate?.payload.verdict as string | undefined;
+  // A research turn has no gate: the user asked directly, so there is nothing
+  // to decide. Without this it would render as "running" forever, which reads
+  // as a hung turn rather than as a different kind of turn.
+  const research = turn.events.some((e) => e.event_type === 'research_started');
+  const verdict = (gate?.payload.verdict as string | undefined) ?? (research ? 'research' : undefined);
 
   return (
     <li className="rounded border border-border bg-surface-raised p-3">
       <div className="mb-2 flex flex-wrap items-baseline gap-2 text-xs">
         <span
           className={`rounded px-1.5 py-0.5 font-medium ${
-            verdict === 'respond' ? 'bg-accent-soft text-accent' : 'text-muted'
+            verdict === 'respond' || verdict === 'research'
+              ? 'bg-accent-soft text-accent'
+              : 'text-muted'
           }`}
         >
           {verdict ?? 'running'}
         </span>
         {gate?.payload.rule ? (
           <span className="font-mono text-muted">{String(gate.payload.rule)}</span>
+        ) : research ? (
+          <span className="font-mono text-muted">user-invoked, gate bypassed</span>
         ) : null}
         <span className="ml-auto text-muted">
           {turn.tokens > 0 && `${turn.tokens} tok · $${turn.cost.toFixed(4)}`}
@@ -243,6 +251,31 @@ function describe(e: EventRow): string {
       return `failed: ${p.error_kind}`;
     case 'memory_extraction_failed':
       return `extraction failed — nothing was learned from this turn, and nothing retries`;
+    case 'tool_invoked':
+      if (p.rejected) return `${p.tool} — input rejected: ${p.reason}`;
+      return `${p.tool}${p.externally_observable ? ' · externally observable' : ''}`;
+    case 'tool_result':
+      if (p.error) return `${p.tool} failed — the turn continued without it${ms}`;
+      return (
+        `${p.tool}${p.untrusted ? ' · returned UNTRUSTED content, so the turn is now closed to outward-facing tools' : ''}` +
+        `${p.citations ? ` · ${(p.citations as string[]).length} citation(s)` : ''}${ms}`
+      );
+    /**
+     * The best single artifact in this panel: an exfiltration attempt that
+     * could not happen, rather than one the model declined. If this line is
+     * present, D-022 removed the capability mid-turn.
+     */
+    case 'tool_call_blocked_untrusted':
+      return `${p.tool} BLOCKED — ${p.reason}`;
+    case 'research_started':
+      return `up to ${p.max_steps} steps · tools offered: ${
+        (p.tools_offered as string[] | undefined)?.join(', ') || 'none'
+      }`;
+    case 'research_finished':
+      return (
+        `${p.steps} step(s), stopped by ${String(p.stopped_by).replace('_', ' ')}` +
+        `${p.touched_untrusted_content ? ' · read untrusted content' : ''}${ms}`
+      );
     default:
       return Object.keys(p).length ? JSON.stringify(p).slice(0, 120) : '';
   }

@@ -135,7 +135,7 @@ export async function runTurn(params: TurnParams): Promise<TurnResult> {
  *
  * The current turn's own `turn_started` row is already written, hence `>`.
  */
-async function checkRateLimit(
+export async function checkRateLimit(
   ctx: ScopedAgentContext,
 ): Promise<{ window: string; count: number; limit: number } | null> {
   const windows = [

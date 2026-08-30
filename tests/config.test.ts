@@ -11,6 +11,7 @@ import {
   estimateCost,
   TOOLS,
   RESEARCH_TOOL,
+  PLATFORM,
   type ModelTier,
 } from '@/config';
 
@@ -151,6 +152,39 @@ describe('tool budgets', () => {
 
   it('research finishes before its own model call times out', () => {
     expect(RESEARCH_TOOL.timeoutMs).toBeLessThan(TIERS.reason.timeoutMs);
+  });
+
+  /**
+   * The whole chain has to fit inside the container that runs it. The agent
+   * turn runs in `after()`, and `after()` counts toward the function's
+   * duration — so the route ceiling is the real bound on everything below it.
+   *
+   * This existed as a bug before it existed as a test: the route declared 60
+   * seconds while the deep tier budgeted 240 and research 180, so both were
+   * budgets for a container four times larger than the one they ran in.
+   */
+  it('every turn budget fits inside the serverless invocation ceiling', () => {
+    const ceiling = PLATFORM.turnRouteMaxDurationSeconds * 1_000;
+    expect(RESEARCH_TOOL.timeoutMs, 'research exceeds the route ceiling')
+      .toBeLessThan(ceiling);
+    for (const [name, tier] of Object.entries(TIERS)) {
+      expect(tier.timeoutMs, `tier ${name} exceeds the route ceiling`)
+        .toBeLessThanOrEqual(ceiling);
+    }
+  });
+
+  it('the route declares exactly that ceiling', () => {
+    // A number in config that the route does not honour is not a bound. It has
+    // to be a literal there — Next reads route segment config statically and
+    // rejects an imported expression — so this is the guard against the two
+    // copies drifting apart.
+    const route = readFileSync(
+      join(process.cwd(), 'app', 'api', 'chats', '[chatId]', 'messages', 'route.ts'),
+      'utf8',
+    );
+    const declared = /export const maxDuration = (\d+);/.exec(route)?.[1];
+    expect(declared, 'the turn route must declare maxDuration').toBeDefined();
+    expect(Number(declared)).toBe(PLATFORM.turnRouteMaxDurationSeconds);
   });
 
   it('starts with an empty post-untrusted allowlist — fail closed', () => {

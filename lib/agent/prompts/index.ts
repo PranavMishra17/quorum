@@ -18,3 +18,4 @@ export { judgePrompt } from './judge';
 export { replyPrompt, memorySection, type MemoryLine, type ReplyPromptParams } from './reply';
 export { extractPrompt } from './extract';
 export { documentExtractPrompt } from './document';
+export { researchPrompt } from './research';

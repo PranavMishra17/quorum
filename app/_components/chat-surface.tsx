@@ -249,10 +249,12 @@ function Composer({
   return (
     <div className="mt-4">
       {notice && <p className="mb-2 text-xs text-muted">{notice}</p>}
+      {/* The composer is the only place a user learns these exist, so both
+          affordances are named here rather than in documentation nobody opens. */}
       <form onSubmit={submit} className="flex gap-2">
         <label
           className="grid cursor-pointer place-items-center rounded-lg border border-border bg-surface-raised px-3 text-sm transition hover:border-accent"
-          title="Attach a text file — txt, md, csv, html, json or xml"
+          title="Attach a document — txt, md, csv, html, json, xml, PDF or Word (.docx)"
         >
           {uploading ? '…' : '+'}
           <input
@@ -266,7 +268,7 @@ function Composer({
         <input
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          placeholder="Message — mention @quorum to address the agent directly"
+          placeholder="Message — @quorum to address the agent, /research … for a deeper answer"
           className="flex-1 rounded-lg border border-border bg-surface px-3 py-2.5 text-sm outline-none transition focus:border-accent"
         />
         <button
@@ -277,6 +279,13 @@ function Composer({
           Send
         </button>
       </form>
+      {value.trim().toLowerCase().startsWith('/research') && (
+        <p className="mt-2 text-xs text-muted">
+          Research runs a longer, multi-step turn: the agent reads the documents
+          attached here before answering, and cites what it used. It skips the
+          usual &ldquo;should I speak?&rdquo; check, because you asked directly.
+        </p>
+      )}
     </div>
   );
 }

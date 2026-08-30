@@ -300,10 +300,33 @@ export const CONNECTORS = {
 } as const;
 
 /**
- * The research tool is USER-INVOKED and runs as its own turn type — it is not
+ * The serverless invocation ceiling the turn route runs under.
+ *
+ * It lives here because THREE numbers have to fit inside it and they were, until
+ * this was written, each assuming a different one. `TIERS.reason.timeoutMs`
+ * carried a comment about staying "under the platform ceiling" while the route
+ * that runs it declared 60 seconds — so the deep tier's budget was four times
+ * the container it ran in, which is dead configuration of exactly the kind the
+ * TOOLS comment above warns about.
+ *
+ * The agent turn runs in `after()`, and `after()` work counts toward the
+ * function's duration. So this is the real ceiling on a turn, not a suggestion.
+ * Deployment plans cap it lower (Vercel Hobby in particular); if the platform
+ * truncates a turn, the reply is lost and the deferred memory extraction with
+ * it. Lower this rather than discovering that in production.
+ *
+ * Asserted against the tier and research budgets in tests/config.test.ts.
+ */
+export const PLATFORM = {
+  turnRouteMaxDurationSeconds: 300,
+} as const;
+
+/**
+ * The research turn is USER-INVOKED and runs as its own turn type — it is not
  * part of the automatic tool loop above, which is why its budget legitimately
  * exceeds TOOLS.maxWallClockMs. Its ceiling must stay under
- * TIERS.reason.timeoutMs so the model call is never the thing that dies first.
+ * TIERS.reason.timeoutMs so the model call is never the thing that dies first,
+ * and under the platform ceiling so the container is never what kills it.
  */
 export const RESEARCH_TOOL = {
   maxSteps: 5,

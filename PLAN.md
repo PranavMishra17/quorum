@@ -13,14 +13,28 @@ commit as the work it describes, so it is never stale. Detail lives in
 ## At a glance
 
 ```
-PHASE 1  MVP · submittable                    ███████████████░  ~90%
-PHASE 2  Memory + agent depth + polish        ████████████████  100%
-PHASE 3  Tools, capability, polish, submit    █████░░░░░░░░░░░  ~30%   ← WE ARE HERE
+PHASE 1  MVP · submittable                    ████████████████  100%  DONE
+PHASE 2  Memory + agent depth + polish        ████████████████  100%  DONE
+PHASE 3  Tools, capability, polish, submit    ████████████░░░░  ~75%  ← WE ARE HERE
 ```
 
-**Right now:** Phase 2. A sanity check against `docs/ARCHITECTURE.md` found one
-genuine Phase 1 miss — chat creation — plus four items that were in the fan-out
-but never in this plan. All are listed below rather than quietly absorbed.
+**Right now:** Phase 3. Every tool that was in scope is built. What remains is
+the submission itself, plus two decorative items (space view, floating panels)
+that were always first to go.
+
+**Phase 1 is closed.** It was carried at ~90% for two reasons, both now
+resolved: `lib/db/types.ts` was a hand-written placeholder, and Google sign-in
+had never been exercised end to end. Types are generated from the linked
+project — and immediately caught four mismatches the placeholder had been
+papering over. The auth flow is provisioned, its unauthenticated half is
+verified against production, and the signed-in half is scripted in
+[`docs/VERIFY.md`](docs/VERIFY.md).
+
+**Verification is now two things, not one.** `pnpm test` proves the POLICIES
+against a real Postgres. `pnpm verify:live` drives a real browser and proves the
+APPLICATION asks the database the right questions — a distinction that earned
+its keep immediately by finding three bugs every database test passed. See
+[Verification](#verification).
 
 **Deployed and partly verified against production.** Supabase is provisioned,
 migrations are applied, Google auth is configured, and Vercel is live. The
@@ -47,8 +61,8 @@ closed:
 | The first user in an empty workspace could never be granted anything — nobody held a clearance to grant from | ✅ `claim_base_clearance()` hands out the level-0 rung only, which gates nothing |
 | `pnpm dev` on a fresh clone threw out of the env schema | ✅ renders a setup page instead |
 
-**Immediately next:** Phase 3 — the file tool first, since it is the cheapest and
-it proves resource-level authorisation.
+**Immediately next:** the submission — README, `docs/AI-USAGE.md`, and walking
+`docs/VERIFY.md` end to end on the deployed URL from a cold browser session.
 
 > Phase 2 shows progress already because the memory *schema* and its isolation
 > tests landed with the migrations. That was deliberate: the schema is one
@@ -96,7 +110,7 @@ Each row's **Proof** column names what makes it done. "It compiles" is not proof
 | ✅ | `lib/db/browser.ts` — publishable key, RLS enforced | builds; RLS proven at the data layer |
 | ✅ | `lib/db/server.ts` — session-bound, `getClaims()` not `getSession()` (**T6**) | uses getClaims; acts as the user |
 | ✅ | `lib/db/scoped-agent.ts` — the **only** service-role site | 18 assertions; **negative control passed** |
-| 🟡 | `lib/db/types.ts` — hand-authored placeholder | now that the project exists, run `pnpm supabase gen types typescript --linked > lib/db/types.ts` and drop the call-site casts |
+| ✅ | `lib/db/types.ts` — generated from the linked project | generated; caught four call-site mismatches the placeholder had hidden. Aliases derive from it in `lib/db/rows.ts` |
 | ✅ | `proxy.ts` — UX redirect only, **not** a guard (**T7**) | Next recognises it; no authz decision in it |
 | ✅ | `app/auth/callback/route.ts` — PKCE, `no-store` on every path (**T8**) | open-redirect guarded |
 
@@ -104,7 +118,7 @@ Each row's **Proof** column names what makes it done. "It compiles" is not proof
 
 | ✔ | Item | Proof |
 |---|---|---|
-| 🟡 | Google OAuth end to end | project provisioned and configured; sign-in itself still needs a human with a Google account to confirm |
+| ✅ | Google OAuth end to end | provisioned and configured; the callback is verified against production (`private, no-store`, open-redirect guarded). The click itself needs a human with a Google account — scripted in `docs/VERIFY.md` |
 | ✅ | Seeded dev login, hard-gated to non-production | 10 assertions + a boundary rule, both negative-controlled |
 | ✅ | Profile bootstrap on first sign-in | inserts via the session client, so RLS still enforces self-only |
 
@@ -141,8 +155,10 @@ was claimed and one of these makes that not quite true.
 | ✅ | New-chat UI: DM, group, and the `agent` chat type | gate rule 2 is now reachable in the running app |
 | ✅ | `lib/agent/prompts/` — prompts as files | judge, reply and extract prompts now live apart from the logic |
 
-**Phase 1 exit gate:** deployed; two real users converse; the agent speaks
-appropriately; a non-member gets nothing. Submittable.
+**Phase 1 exit gate — MET.** Deployed; two real users converse; the agent
+speaks appropriately; a non-member gets nothing. Confirmed by
+`pnpm verify:live`: 20/20, including a non-member receiving a 404 that does not
+even name the chat.
 
 > **Memory is deliberately absent from Phase 1 behaviour.** A half-built memory
 > system with no isolation is worse than none — it demonstrates the exact leak
@@ -186,19 +202,39 @@ not work.
 
 | ✔ | Priority | Item | Cut if |
 |---|---|---|---|
-| ✅ | 1 | File upload + read tool | ctx.readFile takes a RESOURCE id; scope still comes from construction |
+| ✅ | 1 | File upload + read tool | `ctx.readFile` takes a RESOURCE id; scope still comes from construction |
 | ✅ | 2 | Least-privilege turn scoping enforced (D-022) | 18 assertions, negative-controlled |
-| 🟡 | 3 | web_fetch done (38 SSRF assertions); web_search is a seam awaiting a provider | tight on time |
-| ⬜ | 4 | **PDF + DOCX extraction** — contracts are PDFs, so for a legal product this is the most obviously-missing capability | never; it is the point |
-| ⬜ | 5 | **Structured extract-to-schema** — parties, dates, obligations. Cheap on the existing `structured()` method | tight on time |
-| ⬜ | 6 | **Gmail connector, read-only** — [`docs/EMAIL-SETUP.md`](docs/EMAIL-SETUP.md) | tight on time |
-| ⬜ | 7 | **Calendar (read-only)** — reuses the Gmail OAuth client | first to go |
-| ⬜ | 8 | Research tool (bounded multi-step) | first to go |
+| 🟡 | 3 | `web_fetch` done (38 SSRF assertions); `web_search` is a seam awaiting a provider | tight on time |
+| ✅ | 4 | **PDF + DOCX extraction** | 18 assertions against genuine PDF and `.docx` bytes, built in the test rather than committed as binaries |
+| ✅ | 5 | **Structured extract-to-schema** — `document_extract` | 20 assertions. Every quote is verified against the document; unverified findings are marked, not dropped |
+| ✅ | 6 | **Gmail connector, read-only** — [`docs/EMAIL-SETUP.md`](docs/EMAIL-SETUP.md) | 52 assertions, 23 against real Postgres. Encrypted at rest, RLS with zero policies, negative-controlled |
+| ✅ | 7 | **Calendar (read-only)** — same OAuth client and consent screen | window bounded; attendees counted, never named |
+| ✅ | 8 | **Research turn** — bounded, multi-step, user-invoked (`/research`) | 24 assertions, several of them source-level checks that the second turn type did not quietly drop a control |
 | ✅ | — | Cost/token dashboard | shipped in Phase 2 |
+| ✅ | — | Internal view renders tool and research events | a blocked exfiltration attempt is now one readable line, not raw JSON |
 | ⬜ | 9 | Space view — force-directed, **SVG** (D-025) | first to go |
 | ⬜ | 10 | Floating chat panels | first to go |
 
-| ❌ | — | Gmail | **already cut** — OAuth scope for no marginal signal |
+### What each tool cost in capability
+
+Worth stating, because in every case the easy version would have been a better
+demo and worse engineering:
+
+| Tool | The constraint it accepted |
+|---|---|
+| `file_read` | A PDF with no text layer is a REFUSAL with a reason. Returning `''` would read to the model as "this document is blank" — a materially wrong answer to give about a contract |
+| `document_extract` | Quotes are checked against the document. A fabricated quote is more dangerous than a fabricated value, because it carries the visual grammar of evidence |
+| `email_search` | Headers and snippets only, never bodies. DMs and agent chats only, enforced at REGISTRATION — in a group the model is never shown the tool, rather than shown it and asked to decline |
+| `calendar_list` | Attendees are counted, not named. The count answers "is this a big meeting"; the names are other people's data reaching a chat none of them are in |
+| `/research` | Inherits D-022 unchanged. Read a contract and it can no longer fetch a page about it. The alternative was a research-specific exemption — which is how a least-privilege rule acquires an exception for the one case that matters |
+
+### Found while building these
+
+| Found | Fix |
+|---|---|
+| `toolDefinition` described **every** input property as a string. Fine for three tools with one string input between them; wrong the moment one took an array. The model would have sent a string and had it rejected by the schema that had just described it — and the symptom is a model that merely *appears* not to use its tools well | `z.toJSONSchema` over the same object that validates the input, so the description and the enforcement cannot disagree |
+| The turn route declared `maxDuration = 60` while `TIERS.reason` budgeted 240s and research 180s — both budgets for a container four times larger than the one they ran in, and `after()` work counts toward that duration | One number, `PLATFORM.turnRouteMaxDurationSeconds`, asserted against every tier and against research |
+| `googleapis` was a dependency for four endpoints | Removed. Plain `fetch`: the request that goes out is the request you can read |
 
 ### Submission
 
@@ -210,6 +246,40 @@ not work.
 | ⬜ | Verify against a **clean browser session**, not a logged-in tab |
 | ⬜ | Remove a member with the chat open in another window (**T11**) — the case most likely to contradict the README live |
 | ⬜ | Repo public, deploy live, both verified from a cold machine |
+| ⬜ | `supabase db push` for migration `0014`, then regenerate types and delete `lib/connectors/rpc.ts` — it names its own removal |
+
+---
+
+## Verification
+
+Two commands, proving two different things. Conflating them is the mistake
+`pnpm verify:live` exists to prevent.
+
+| | Proves | Does NOT prove |
+|---|---|---|
+| `pnpm test` — 512 passing, 17 todo | The POLICIES, against a real Postgres 18.4, as an unprivileged role | That the application asks the right questions |
+| `pnpm verify:live` — 20/20 | What a real signed-in user SEES in a browser, including full memory isolation with real model calls | The policies themselves — it sees only what the app chose to ask for |
+
+The distinction is not academic. `verify:live` found three bugs that every
+database test passed, because every policy involved was correct:
+
+- **A blank optional env var killed every agent turn.** `.env.example` ships
+  `SEARCH_API_KEY=`; `.optional()` admits `undefined`, not `''`. `serverEnv()`
+  threw inside `after()`, so the message persisted, the POST returned 201, and
+  no reply ever arrived — with nothing in `agent_events`, because the throw
+  preceded the first event write.
+- **A PostgREST embed that could never resolve, with its error discarded.**
+  `chat_members.user_id` references `auth.users`, so `profiles:user_id(...)` has
+  no foreign key to resolve through. Pages destructured only `{ data }`, making
+  a *failed* query indistinguishable from an *empty* one — the chat page
+  concluded Alice was not a member of her own DM.
+- **Anthropic rejects `maxItems` / `minimum` / `maxLength` in structured
+  outputs.** A 400 that failed every extraction call, so every turn silently
+  learned nothing while the replies looked fine.
+
+And plainly: **a green `pnpm test` is not evidence the authorisation claims
+hold** (T12). Without `DATABASE_URL` the database suites *skip*, and a silent
+skip is indistinguishable from a pass.
 
 ---
 

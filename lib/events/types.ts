@@ -31,6 +31,9 @@ export type AgentEventType =
   | 'tool_invoked'
   | 'tool_result'
   | 'tool_call_blocked_untrusted'
+  // --- research (a user-invoked turn type; see lib/agent/research.ts) ---
+  | 'research_started'
+  | 'research_finished'
   // --- turn ---
   | 'turn_started'
   | 'turn_completed'
