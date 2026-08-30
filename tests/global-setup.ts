@@ -1,3 +1,4 @@
+import { existsSync, readdirSync } from 'node:fs';
 import { config } from 'dotenv';
 import EmbeddedPostgres from 'embedded-postgres';
 import { Client } from 'pg';
@@ -62,10 +63,16 @@ export default async function setup() {
     persistent: true,
   });
 
-  try {
+  // initdb refuses a non-empty directory and prints a wall of stderr doing so.
+  // Checking first keeps a normal run quiet; a warm data dir is also much
+  // faster than re-initialising, and resetDatabase() below guarantees the
+  // schema is rebuilt regardless.
+  const alreadyInitialised =
+    existsSync(DATA_DIR) && readdirSync(DATA_DIR).length > 0;
+
+  if (!alreadyInitialised) {
+    process.stderr.write('  ▸ initialising embedded Postgres (first run only)…\n');
     await instance.initialise();
-  } catch {
-    // Already initialised from a previous run; only the start below matters.
   }
   await instance.start();
 

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { Client } from 'pg';
 import { asUser, asAnon, asSuper } from '../db/harness';
+import { truncateAll } from '../db/fixtures';
 
 /**
  * Foundation tests for migrations 0001–0002.
@@ -18,6 +19,9 @@ let admin: Client;
 
 beforeAll(async () => {
   admin = await asSuper();
+  // Suites share one database and run serially. Each starts from a clean world
+  // so a count assertion here cannot be broken by another file's fixtures.
+  await truncateAll(admin);
   await admin.query(
     `insert into auth.users (id, email) values ($1,'alice@test'), ($2,'bob@test')
      on conflict (id) do nothing`,
