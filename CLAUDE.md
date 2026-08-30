@@ -114,11 +114,20 @@ research/        RESEARCH.md (plan) + reports/
 ## Commands
 
 ```bash
-pnpm dev            # next dev --turbopack
+pnpm dev                # next dev --turbopack
 pnpm build
 pnpm lint
-pnpm test           # vitest  (once configured)
+pnpm test               # vitest
+pnpm check:boundaries   # enforces non-negotiables 2, 3 and the NEXT_PUBLIC_ rule
+pnpm check              # boundaries + lint + test — the same gate CI runs
 ```
+
+**Run `pnpm check` before every commit.** `check:boundaries` is what turns
+non-negotiables 2 and 3 from documented wishes into a failing build: it fails if
+`SUPABASE_SECRET_KEY` is referenced outside `lib/db/scoped-agent.ts`, if a memory
+table is queried outside `lib/memory/`, or if a secret acquires a
+`NEXT_PUBLIC_` prefix. It is not a security boundary — RLS is — but it catches
+the mistake at the earliest point it can be caught.
 
 ---
 

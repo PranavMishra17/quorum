@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Fast checks. Boundaries run FIRST — a service-role key in the wrong file is
+  # a more serious finding than a lint error, so it should fail sooner.
+  # ---------------------------------------------------------------------------
+  check:
+    name: boundaries · lint · test · build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Architectural boundaries
+        run: node scripts/check-boundaries.mjs
+
+      - run: pnpm lint
+
+      - name: Unit tests
+        # No DATABASE_URL here, so integration suites skip themselves. These
+        # must never need an API key: the Anthropic key is short-lived, and a
+        # suite that dies with a key is not a suite.
+        run: pnpm test
+
+      - name: Build
+        # Placeholder public values only. NEXT_PUBLIC_* are inlined at build
+        # time, so the build needs *a* value; it does not need a real project.
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_placeholder
+        run: pnpm build
+
+  # ---------------------------------------------------------------------------
+  # RLS and authorization tests against a real Postgres.
+  #
+  # These exist because testing row-level security through a service-role client
+  # tests nothing — that key bypasses the thing under test. The suite connects
+  # as an unprivileged role with a JWT context set per test.
+  #
+  # Skips itself until migrations exist, so it is green from day one.
+  # ---------------------------------------------------------------------------
+  database:
+    name: rls · authorization
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: quorum_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Detect migrations
+        id: migrations
+        run: |
+          if compgen -G "supabase/migrations/*.sql" > /dev/null; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No migrations yet — database suite skipped."
+          fi
+
+      - name: Apply migrations
+        if: steps.migrations.outputs.present == 'true'
+        env:
+          PGPASSWORD: postgres
+        run: |
+          for f in supabase/migrations/*.sql; do
+            echo "→ $f"
+            psql -h localhost -U postgres -d quorum_test -v ON_ERROR_STOP=1 -f "$f"
+          done
+
+      - name: Authorization tests
+        if: steps.migrations.outputs.present == 'true'
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/quorum_test
+        run: pnpm test

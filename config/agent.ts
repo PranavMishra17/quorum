@@ -141,7 +141,7 @@ export const CONTEXT = {
    * Drop order when over budget. Anything dropped writes a `context_dropped`
    * event so the internal view can show what the agent did NOT see.
    */
-  dropOrder: ['tool_results', 'memory_items', 'older_history'],
+  dropOrder: ['tool_results', 'memory', 'older_history'],
 } as const;
 
 // ---------------------------------------------------------------------------

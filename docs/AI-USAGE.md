@@ -100,6 +100,41 @@ D-entry is mine; the model formatted it.
 
 ---
 
+### Session 3 — test harness and CI
+
+**AI-generated, then reviewed by me:** `vitest.config.mts`, `tests/setup.ts`,
+`tests/README.md`, seven test files, `scripts/check-boundaries.mjs`, and
+`.github/workflows/ci.yml`.
+
+**Mine:** the decision that the test list is committed as executable `todo`
+entries rather than written later. 102 todos, one per claim the README makes, so
+the claims and the suite cannot silently drift apart. Also the decision that
+`check-boundaries.mjs` should exist at all — it converts CLAUDE.md
+non-negotiables 2 and 3 from things a reviewer must remember to look for into
+things CI fails on.
+
+**How I checked it.**
+
+- `pnpm check` runs clean: boundaries pass, lint passes, 35 assertions pass.
+- **The boundary checker found a real problem on its first run**, which is the
+  best evidence that it works: `config/agent.ts` had `'memory_items'` as a
+  context drop-order label, which is indistinguishable from a table name to any
+  grep-based rule. I renamed the label to `'memory'` rather than loosening the
+  rule — the checker was right that the string was ambiguous.
+- I verified `config.test.ts` fails when it should, by temporarily breaking the
+  ranking weights so they no longer sum to 1. A test suite never observed
+  failing is not evidence of anything.
+- The `database` CI job is written but skips itself until migrations exist, so
+  it is honest rather than aspirational — it will not report green on work it
+  did not do.
+
+**Not delegated.** The two testing rules in `tests/README.md` — RLS tested only
+as an unprivileged role, and no test requiring a live model call — are
+constraints I set, and both exist for reasons specific to this project rather
+than as general good practice.
+
+---
+
 ## Sessions to come
 
 Entries will be appended per session with the same structure: what was

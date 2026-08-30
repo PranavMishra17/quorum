@@ -16,6 +16,6 @@ export default defineConfig({
     testTimeout: 20_000,
   },
   resolve: {
-    alias: { '@': path.resolve(__dirname, '.') },
+    alias: { '@': path.resolve(import.meta.dirname, '.') },
   },
 });
