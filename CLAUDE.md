@@ -350,3 +350,7 @@ security boundary — RLS is — but it catches the mistake at the earliest poin
 - Commits: imperative subject, body explaining *why*. Author is
   `PranavMishra17 <pranavmishra.fc17@gmail.com>`. **No AI co-author trailer,
   ever** (§0).
+
+---
+
+**Live status:** [PLAN.md](PLAN.md) — where the build is, across the three phases.
