@@ -121,7 +121,7 @@ export function ChatSurface({
   );
 
   return (
-    <div className="flex h-[calc(100vh-9rem)] flex-col">
+    <div className="flex h-[calc(100vh-16rem)] min-h-[24rem] flex-col">
       <div className="flex-1 space-y-4 overflow-y-auto pr-1">
         {optimistic.length === 0 && (
           <p className="py-12 text-center text-sm text-muted">No messages yet.</p>

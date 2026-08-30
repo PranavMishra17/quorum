@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { createClient, requireActor } from '@/lib/db/server';
+import { NewChat, type Person, type ClearanceOption } from '@/app/_components/new-chat';
 
 export const metadata = { title: 'Chats' };
 
@@ -54,17 +55,48 @@ export default async function ChatsPage() {
     namesByChat.set(r.chat_id, list);
   }
 
+  // Everyone the viewer could start a chat with. Profiles are readable by any
+  // signed-in user by design — you cannot click a person to DM them if you
+  // cannot see that they exist.
+  const { data: profiles } = await supabase
+    .from('profiles')
+    .select('id, display_name, color')
+    .neq('id', actor.id)
+    .order('display_name');
+
+  // Only clearances the viewer HOLDS. create_chat() refuses a chat above your
+  // own level anyway; offering the option would just be an error waiting to
+  // happen.
+  const { data: myClearances } = await supabase
+    .from('user_clearances')
+    .select('clearances(id, name, level)')
+    .eq('user_id', actor.id);
+
+  const people: Person[] = ((profiles ?? []) as unknown as
+    { id: string; display_name: string; color: string }[]
+  ).map((p) => ({ id: p.id, name: p.display_name, color: p.color }));
+
+  const clearanceOptions: ClearanceOption[] = ((myClearances ?? []) as unknown as
+    { clearances: ClearanceOption | null }[]
+  ).map((r) => r.clearances).filter((c): c is ClearanceOption => Boolean(c))
+    .sort((a, b) => a.level - b.level);
+
   const joined = rows.filter((c) => myStatus.get(c.id) === 'member');
   const discoverable = rows.filter((c) => myStatus.get(c.id) !== 'member');
 
   return (
     <div className="space-y-10">
       <section>
-        <h1 className="mb-1 text-lg font-semibold">Your chats</h1>
-        <p className="mb-4 text-xs text-muted">
-          The agent is present in every one of these and decides for itself
-          whether to speak.
-        </p>
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="mb-1 text-lg font-semibold">Your chats</h1>
+            <p className="text-xs text-muted">
+              The agent is present in every one of these and decides for itself
+              whether to speak.
+            </p>
+          </div>
+          <NewChat people={people} clearances={clearanceOptions} />
+        </div>
 
         {joined.length === 0 ? (
           <EmptyState />

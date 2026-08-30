@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { createClient, requireActor } from '@/lib/db/server';
 import { ChatSurface, type UiMessage } from '@/app/_components/chat-surface';
+import { InternalView, type EventRow, type CallRow } from '@/app/_components/internal-view';
 
 /**
  * A chat.
@@ -81,6 +82,24 @@ export default async function ChatPage({
     );
   }
 
+  // The internal view reads the same tables through the same RLS. A viewer who
+  // cannot access the chat gets an empty panel for the same reason they get an
+  // empty chat — there is no separate authorisation path to get wrong.
+  const [{ data: events }, { data: calls }] = await Promise.all([
+    supabase
+      .from('agent_events')
+      .select('id, turn_id, event_type, payload, created_at')
+      .eq('chat_id', chatId)
+      .order('created_at', { ascending: false })
+      .limit(300),
+    supabase
+      .from('llm_calls')
+      .select('id, turn_id, purpose, model, status, input_tokens, output_tokens, cost_estimate')
+      .eq('chat_id', chatId)
+      .order('created_at', { ascending: false })
+      .limit(300),
+  ]);
+
   const initial: UiMessage[] = (
     (messages ?? []) as unknown as {
       id: string; sender_type: 'user' | 'agent'; sender_id: string | null;
@@ -120,6 +139,12 @@ export default async function ChatPage({
         meId={actor.id}
         initialMessages={initial}
         people={people}
+      />
+
+      <InternalView
+        chatId={chatId}
+        initialEvents={(events ?? []) as unknown as EventRow[]}
+        initialCalls={(calls ?? []) as unknown as CallRow[]}
       />
     </div>
   );
