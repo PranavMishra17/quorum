@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import {
   MODELS,
@@ -155,6 +157,23 @@ describe('tool budgets', () => {
     // Once a turn ingests untrusted tool content it may only call tools on
     // this list. Empty means: no further tool calls at all.
     expect(TOOLS.postUntrustedAllowlist).toEqual([]);
+  });
+});
+
+describe('the seeded ladder matches config', () => {
+  it('0008_seed_clearances.sql agrees with CLEARANCES', () => {
+    // Two sources of truth for the same ladder — config/agent.ts drives the
+    // application, the migration drives the database. If they drift, the
+    // clearance floor compares against levels the app does not believe in, and
+    // nothing else in the suite would notice.
+    const sql = readFileSync(
+      join(process.cwd(), 'supabase', 'migrations', '0008_seed_clearances.sql'),
+      'utf8',
+    );
+    const seeded = [...sql.matchAll(/\('([a-z_]+)',\s*'([^']+)',\s*(\d+),/g)].map(
+      (m) => ({ key: m[1], name: m[2], level: Number(m[3]) }),
+    );
+    expect(seeded).toEqual(CLEARANCES.map((c) => ({ key: c.key, name: c.name, level: c.level })));
   });
 });
 
