@@ -5,6 +5,7 @@ import { ChatSurface, type UiMessage } from '@/app/_components/chat-surface';
 import { InternalView, type EventRow, type CallRow } from '@/app/_components/internal-view';
 import { Roster, type RosterMember } from '@/app/_components/roster';
 import { namesFor } from '@/lib/db/profiles';
+import { PopOutButton } from '@/app/_components/floating-panels/pop-out-button';
 
 /**
  * A chat.
@@ -35,7 +36,7 @@ export default async function ChatPage({
   const [{ data: messages }, { data: members, error: memberError }] = await Promise.all([
     supabase
       .from('messages')
-      .select('id, sender_type, sender_id, content, created_at')
+      .select('id, sender_type, sender_id, content, created_at, turn_id')
       .eq('chat_id', chatId)
       .order('created_at', { ascending: true })
       .limit(200),
@@ -128,7 +129,7 @@ export default async function ChatPage({
   const initial: UiMessage[] = (
     (messages ?? []) as unknown as {
       id: string; sender_type: 'user' | 'agent'; sender_id: string | null;
-      content: string; created_at: string;
+      content: string; created_at: string; turn_id: string;
     }[]
   ).map((m) => ({
     id: m.id,
@@ -141,6 +142,7 @@ export default async function ChatPage({
     senderColor: people[m.sender_id ?? '']?.color ?? 'var(--agent)',
     content: m.content,
     createdAt: m.created_at,
+    turnId: m.turn_id,
   }));
 
   return (
@@ -154,9 +156,15 @@ export default async function ChatPage({
             {rosterMembers.filter((m) => m.status === 'member').map((m) => m.name).join(', ')}
           </p>
         </div>
-        <span className="shrink-0 rounded bg-accent-soft px-2 py-0.5 text-[10px] uppercase tracking-wide text-accent">
-          {chatRow.clearances?.name ?? 'General'}
-        </span>
+        <div className="flex shrink-0 items-center gap-2">
+          <PopOutButton
+            chatId={chatId}
+            title={chatRow.name ?? (chatRow.type === 'dm' ? 'Direct message' : 'Chat')}
+          />
+          <span className="rounded bg-accent-soft px-2 py-0.5 text-[10px] uppercase tracking-wide text-accent">
+            {chatRow.clearances?.name ?? 'General'}
+          </span>
+        </div>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_16rem]">
@@ -165,6 +173,8 @@ export default async function ChatPage({
           meId={actor.id}
           initialMessages={initial}
           people={people}
+          initialEvents={(events ?? []) as unknown as EventRow[]}
+          initialCalls={(calls ?? []) as unknown as CallRow[]}
         />
         <Roster
           chatId={chatId}

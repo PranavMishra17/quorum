@@ -15,7 +15,7 @@ commit as the work it describes, so it is never stale. Detail lives in
 ```
 PHASE 1  MVP · submittable                    ████████████████  100%  DONE
 PHASE 2  Memory + agent depth + polish        ████████████████  100%  DONE
-PHASE 3  Tools, capability, polish, submit    ████████████░░░░  ~75%  ← WE ARE HERE
+PHASE 3  Tools, capability, polish, submit    ██████████████░░  ~85%  ← WE ARE HERE
 ```
 
 **Right now:** Phase 3. Every tool that was in scope is built. What remains is
@@ -213,7 +213,45 @@ not work.
 | ✅ | — | Cost/token dashboard | shipped in Phase 2 |
 | ✅ | — | Internal view renders tool and research events | a blocked exfiltration attempt is now one readable line, not raw JSON |
 | ⬜ | 9 | Space view — force-directed, **SVG** (D-025) | first to go |
-| ⬜ | 10 | Floating chat panels | first to go |
+| ✅ | 10 | **Floating chat panels** — pop a chat out into a draggable, resizable window; minimize to a dock; multiple at once, capped at 4 | scoped as decorative from the start; session-only via `sessionStorage`, no durable layout |
+
+### The FE functional pass — inline telemetry, floating panels, and what running the app found
+
+A sanity check against `docs/ARCHITECTURE.md`, `docs/DECISIONS.md` and
+`docs/MEMORY.md`, plus actually driving the running app with Playwright rather
+than reading the components. Two things landed, and two real bugs were found
+doing it — the second pair matters more than the feature work, per the
+project's own stated priority (T12: a thing that looks right in code and has
+not been run is not verified).
+
+**Inline live telemetry.** The agent's thinking and actions now render directly
+in the chat viewport, not only in the collapsed `InternalView` panel: a live
+"thinking…/composing a reply…/using file_read…" status line under the message
+that triggered a turn, settling into a one-line summary (`mentioned · 2660 tok
+· $0.0102`) with the full ordered event trace one click away — including a
+silent turn's reason, shown under the user's own message since no agent reply
+exists to hang it on. `app/_components/event-trace.ts` is the shared
+`describeEvent`/`summariseTurn` module both this and `InternalView` render
+through, specifically so the wording can never disagree between the two.
+
+**Slash-command discovery.** Typing `/` in the composer now opens a popup
+listing available commands (`/research <question>`, extensibly — one array
+entry per command, not a new branch of JSX), rather than requiring a user to
+already know the command exists.
+
+**Floating chat panels.** A chat can be popped out of the list or the full page
+into a draggable, resizable overlay window — reusing `ChatSurface` itself
+rather than a parallel implementation, so a fix to the chat surface is a fix
+everywhere it renders. State lives in React context + `sessionStorage`, capped
+at 4 concurrent panels (each holds its own Realtime subscriptions).
+
+**Found by running it, not by reading it:**
+
+| Found | Fix |
+|---|---|
+| `cannot add postgres_changes callbacks ... after subscribe()` — a real Supabase Realtime race against Next dev's double-invoked effects. The second mount's `.channel(topic)` call, issued before the first mount's async `removeChannel()` leave had resolved, got handed back the ALREADY-SUBSCRIBED first instance instead of a fresh one. Crashed the chat page outright the moment a message was sent | Every Realtime topic now carries a random suffix per effect invocation, so two overlapping mounts can never collide on the same topic. Applied to all four subscription sites (`chat:`, `membership:`, `events:`, `turn:`) |
+| The inline trace's cost/token line was always blank — `TurnTrace` was never given `llm_calls` rows to join against, only `agent_events` | Threaded `initialCalls` through `ChatSurface` → `MessageRow` → `TurnTrace`, from both the server-rendered chat page and the floating panel's client-side loader |
+| The slash-command popup rendered **behind** an open floating panel — the panel host sits at `z-40`, the popup had no explicit z-index | `z-50` on the popup |
 
 ### What each tool cost in capability
 
@@ -257,7 +295,7 @@ Two commands, proving two different things. Conflating them is the mistake
 
 | | Proves | Does NOT prove |
 |---|---|---|
-| `pnpm test` — 512 passing, 17 todo | The POLICIES, against a real Postgres 18.4, as an unprivileged role | That the application asks the right questions |
+| `pnpm test` — 533 passing, 17 todo | The POLICIES, against a real Postgres 18.4, as an unprivileged role | That the application asks the right questions |
 | `pnpm verify:live` — 20/20 | What a real signed-in user SEES in a browser, including full memory isolation with real model calls | The policies themselves — it sees only what the app chose to ask for |
 
 The distinction is not academic. `verify:live` found three bugs that every

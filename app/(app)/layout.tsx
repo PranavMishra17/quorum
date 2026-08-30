@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getActor, createClient } from '@/lib/db/server';
 import { SignOut } from '../_components/sign-out';
+import { FloatingPanelsProvider } from '../_components/floating-panels/context';
+import { FloatingPanelHost } from '../_components/floating-panels/host';
 
 /**
  * The authenticated shell.
@@ -36,6 +38,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const me = profile as { display_name: string; color: string } | null;
 
   return (
+    <FloatingPanelsProvider>
     <div className="flex min-h-full flex-col">
       <header className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur">
         <div className="mx-auto flex w-full max-w-6xl items-center gap-4 px-4 py-3">
@@ -73,5 +76,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
       <div className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">{children}</div>
     </div>
+    <FloatingPanelHost />
+    </FloatingPanelsProvider>
   );
 }

@@ -2,6 +2,9 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/db/browser';
+import { describeEvent, summariseTurn, type EventRow, type CallRow } from './event-trace';
+
+export type { EventRow, CallRow };
 
 /**
  * The agent internal view.
@@ -15,27 +18,12 @@ import { createClient } from '@/lib/db/browser';
  * It reads `agent_events` and `llm_calls` directly through the browser client,
  * so RLS decides what a given viewer sees. A non-member gets an empty panel for
  * the same reason they get an empty chat.
+ *
+ * This is the FULL audit trail across every turn in the chat, kept collapsed by
+ * default. `TurnTrace` (in this same directory) is the lighter-weight sibling
+ * attached inline to each message in the viewport — both read the same
+ * `describeEvent`/`summariseTurn` so the wording never disagrees between them.
  */
-
-export interface EventRow {
-  id: string;
-  turn_id: string;
-  event_type: string;
-  payload: Record<string, unknown>;
-  created_at: string;
-}
-
-export interface CallRow {
-  id: string;
-  turn_id: string;
-  purpose: string;
-  model: string;
-  status: string;
-  input_tokens: number | null;
-  output_tokens: number | null;
-  cost_estimate: string | null;
-}
-
 export function InternalView({
   chatId,
   initialEvents,
@@ -51,8 +39,21 @@ export function InternalView({
 
   useEffect(() => {
     const supabase = createClient();
+    /**
+     * The random suffix on the topic exists because of a real race, not
+     * paranoia: Next dev double-invokes client effects (mount, cleanup, mount
+     * again), and `removeChannel()`'s leave handshake is async. If the second
+     * mount asks for the SAME topic before the first one's leave has resolved,
+     * the client's internal channel registry hands back the
+     * ALREADY-SUBSCRIBED instance from the first mount instead of a fresh one,
+     * and calling `.on()` on it throws "cannot add postgres_changes callbacks
+     * ... after subscribe()". A unique suffix per effect invocation makes
+     * every subscription attempt its own topic, so the two mounts can never
+     * collide — found by actually running the app and sending a message, not
+     * by reading the Realtime docs.
+     */
     const channel = supabase
-      .channel(`events:${chatId}`)
+      .channel(`events:${chatId}:${Math.random().toString(36).slice(2)}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'agent_events', filter: `chat_id=eq.${chatId}` },
@@ -109,15 +110,7 @@ export function InternalView({
   );
 }
 
-interface TurnView {
-  turnId: string;
-  at: string;
-  events: EventRow[];
-  cost: number;
-  tokens: number;
-}
-
-function groupByTurn(events: EventRow[], calls: CallRow[]): TurnView[] {
+function groupByTurn(events: EventRow[], calls: CallRow[]) {
   const byTurn = new Map<string, EventRow[]>();
   for (const e of events) {
     const list = byTurn.get(e.turn_id) ?? [];
@@ -126,19 +119,12 @@ function groupByTurn(events: EventRow[], calls: CallRow[]): TurnView[] {
   }
 
   return [...byTurn.entries()]
-    .map(([turnId, rows]) => {
-      const ordered = [...rows].sort((a, b) => a.created_at.localeCompare(b.created_at));
-      const turnCalls = calls.filter((c) => c.turn_id === turnId);
-      return {
-        turnId,
-        at: ordered[0]?.created_at ?? '',
-        events: ordered,
-        cost: turnCalls.reduce((n, c) => n + Number(c.cost_estimate ?? 0), 0),
-        tokens: turnCalls.reduce(
-          (n, c) => n + (c.input_tokens ?? 0) + (c.output_tokens ?? 0), 0),
-      };
-    })
-    .sort((a, b) => b.at.localeCompare(a.at));
+    .map(([turnId, rows]) => summariseTurn(turnId, rows, calls))
+    .sort((a, b) => {
+      const aAt = a.events[0]?.created_at ?? '';
+      const bAt = b.events[0]?.created_at ?? '';
+      return bAt.localeCompare(aAt);
+    });
 }
 
 function summarise(events: EventRow[], calls: CallRow[]) {
@@ -154,129 +140,37 @@ function summarise(events: EventRow[], calls: CallRow[]) {
   };
 }
 
-function Turn({ turn }: { turn: TurnView }) {
-  const gate = turn.events.find((e) => e.event_type === 'gate_evaluated');
-  // A research turn has no gate: the user asked directly, so there is nothing
-  // to decide. Without this it would render as "running" forever, which reads
-  // as a hung turn rather than as a different kind of turn.
-  const research = turn.events.some((e) => e.event_type === 'research_started');
-  const verdict = (gate?.payload.verdict as string | undefined) ?? (research ? 'research' : undefined);
-
+function Turn({ turn }: { turn: ReturnType<typeof summariseTurn> }) {
   return (
     <li className="rounded border border-border bg-surface-raised p-3">
       <div className="mb-2 flex flex-wrap items-baseline gap-2 text-xs">
         <span
           className={`rounded px-1.5 py-0.5 font-medium ${
-            verdict === 'respond' || verdict === 'research'
+            turn.verdict === 'respond' || turn.verdict === 'research'
               ? 'bg-accent-soft text-accent'
               : 'text-muted'
           }`}
         >
-          {verdict ?? 'running'}
+          {turn.verdict ?? (turn.finished ? 'silent' : 'running')}
         </span>
-        {gate?.payload.rule ? (
-          <span className="font-mono text-muted">{String(gate.payload.rule)}</span>
-        ) : research ? (
-          <span className="font-mono text-muted">user-invoked, gate bypassed</span>
-        ) : null}
+        {turn.rule ? <span className="font-mono text-muted">{turn.rule}</span> : null}
         <span className="ml-auto text-muted">
           {turn.tokens > 0 && `${turn.tokens} tok · $${turn.cost.toFixed(4)}`}
         </span>
       </div>
 
-      {gate?.payload.reason ? (
-        <p className="mb-2 text-xs italic text-muted">
-          &ldquo;{String(gate.payload.reason)}&rdquo;
-        </p>
+      {turn.reason ? (
+        <p className="mb-2 text-xs italic text-muted">&ldquo;{turn.reason}&rdquo;</p>
       ) : null}
 
       <ul className="space-y-1">
         {turn.events.map((e) => (
           <li key={e.id} className="flex gap-2 text-xs">
             <span className="w-44 shrink-0 font-mono text-muted">{e.event_type}</span>
-            <span className="min-w-0 flex-1 text-muted">{describe(e)}</span>
+            <span className="min-w-0 flex-1 text-muted">{describeEvent(e)}</span>
           </li>
         ))}
       </ul>
     </li>
   );
-}
-
-/**
- * Turn a payload into a sentence a non-engineer can read.
- *
- * The internal view's audience is a reviewer, not an SRE. `memory_retrieved`
- * gets the most careful phrasing because it is the one event that demonstrates
- * the project's central claim, and "kept: 3, filtered_out: 7" does not
- * demonstrate anything to someone who has not read the schema.
- */
-function describe(e: EventRow): string {
-  const p = e.payload;
-  const ms = p.duration_ms ? ` · ${p.duration_ms}ms` : '';
-
-  switch (e.event_type) {
-    case 'memory_retrieved': {
-      const kept = Number(p.kept ?? 0);
-      const filtered = Number(p.filtered_out ?? 0);
-      const capped = Number(p.capped_out ?? 0);
-      const parts = [`${kept} item${kept === 1 ? '' : 's'} surfaced`];
-      if (filtered > 0) {
-        parts.push(`${filtered} withheld — not everyone here was in the audience, or the chat is below their clearance`);
-      }
-      if (capped > 0) parts.push(`${capped} dropped by the per-turn budget`);
-      return parts.join('; ') + ms;
-    }
-    case 'memory_written':
-      if (p.summary) return `${p.written} learned, ${p.skipped} skipped${ms}`;
-      return `${p.status === 'candidate' ? 'candidate (not retrievable)' : 'active'} · ${p.source_type}${
-        p.forced_candidate_by_untrusted_content ? ' · forced to candidate: the turn read untrusted content' : ''
-      }`;
-    case 'memory_conflict':
-      return `superseded an earlier fact${p.genuine_tie ? ' — two stated facts disagreed, the newer won' : ''}`;
-    case 'gate_evaluated':
-      return `${p.verdict} via ${p.rule}${ms}`;
-    case 'model_call_started':
-      return `${p.purpose} · ${p.model}`;
-    case 'model_call_succeeded':
-      return `${p.input_tokens}+${p.output_tokens} tokens · $${Number(p.cost_estimate ?? 0).toFixed(4)}${ms}`;
-    case 'model_call_failed':
-      return `failed: ${p.error_kind}${ms}`;
-    case 'context_dropped':
-      return `dropped ${(p.dropped as string[] | undefined)?.join(', ') ?? '—'} to fit the budget`;
-    case 'rate_limited':
-      return `${p.count}/${p.limit} turns this ${p.window}`;
-    case 'turn_completed':
-      return p.spoke ? `spoke${ms}` : `stayed quiet (${p.reason})${ms}`;
-    case 'turn_failed':
-      return `failed: ${p.error_kind}`;
-    case 'memory_extraction_failed':
-      return `extraction failed — nothing was learned from this turn, and nothing retries`;
-    case 'tool_invoked':
-      if (p.rejected) return `${p.tool} — input rejected: ${p.reason}`;
-      return `${p.tool}${p.externally_observable ? ' · externally observable' : ''}`;
-    case 'tool_result':
-      if (p.error) return `${p.tool} failed — the turn continued without it${ms}`;
-      return (
-        `${p.tool}${p.untrusted ? ' · returned UNTRUSTED content, so the turn is now closed to outward-facing tools' : ''}` +
-        `${p.citations ? ` · ${(p.citations as string[]).length} citation(s)` : ''}${ms}`
-      );
-    /**
-     * The best single artifact in this panel: an exfiltration attempt that
-     * could not happen, rather than one the model declined. If this line is
-     * present, D-022 removed the capability mid-turn.
-     */
-    case 'tool_call_blocked_untrusted':
-      return `${p.tool} BLOCKED — ${p.reason}`;
-    case 'research_started':
-      return `up to ${p.max_steps} steps · tools offered: ${
-        (p.tools_offered as string[] | undefined)?.join(', ') || 'none'
-      }`;
-    case 'research_finished':
-      return (
-        `${p.steps} step(s), stopped by ${String(p.stopped_by).replace('_', ' ')}` +
-        `${p.touched_untrusted_content ? ' · read untrusted content' : ''}${ms}`
-      );
-    default:
-      return Object.keys(p).length ? JSON.stringify(p).slice(0, 120) : '';
-  }
 }

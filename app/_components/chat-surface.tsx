@@ -1,9 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useOptimistic, useRef, useState, useTransition } from 'react';
+import { useCallback, useEffect, useMemo, useOptimistic, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/db/browser';
 import { MessageContent } from './message-content';
+import { TurnTrace } from './turn-trace';
+import type { EventRow, CallRow } from './event-trace';
+import { matchingCommands, SLASH_COMMANDS } from './slash-commands';
 
 export interface UiMessage {
   id: string;
@@ -15,6 +18,8 @@ export interface UiMessage {
   createdAt: string;
   pending?: boolean;
   failed?: boolean;
+  /** The turn this message belongs to. Absent for a draft not yet acknowledged. */
+  turnId?: string;
 }
 
 export function ChatSurface({
@@ -22,11 +27,22 @@ export function ChatSurface({
   meId,
   initialMessages,
   people,
+  initialEvents = [],
+  initialCalls = [],
+  containerClassName = 'flex h-[calc(100vh-16rem)] min-h-[24rem] flex-col',
 }: {
   chatId: string;
   meId: string;
   initialMessages: UiMessage[];
   people: Record<string, { name: string; color: string }>;
+  /** Seeds TurnTrace for already-loaded messages, so an old turn does not
+   *  flash "sent…" before its live subscription confirms it already finished. */
+  initialEvents?: EventRow[];
+  /** Seeds TurnTrace's cost/token line. See CallRow note in turn-trace.tsx. */
+  initialCalls?: CallRow[];
+  /** Overridable so the floating-panel host can fit this into a fixed-height
+   *  window instead of the full-page layout's viewport-relative sizing. */
+  containerClassName?: string;
 }) {
   const router = useRouter();
   const [revoked, setRevoked] = useState(false);
@@ -37,6 +53,29 @@ export function ChatSurface({
   );
   const [, startTransition] = useTransition();
   const bottomRef = useRef<HTMLDivElement>(null);
+  // clientMessageId -> turnId, for the pending draft before the persisted row
+  // (which carries turn_id itself) arrives over Realtime.
+  const [pendingTurns, setPendingTurns] = useState<Record<string, string>>({});
+
+  const eventsByTurn = useMemo(() => {
+    const map: Record<string, EventRow[]> = {};
+    for (const e of initialEvents) (map[e.turn_id] ??= []).push(e);
+    return map;
+  }, [initialEvents]);
+
+  const callsByTurn = useMemo(() => {
+    const map: Record<string, CallRow[]> = {};
+    for (const c of initialCalls) (map[c.turn_id] ??= []).push(c);
+    return map;
+  }, [initialCalls]);
+
+  // A turn that already produced an agent message renders its trace under
+  // THAT message, not under the user's — otherwise a spoken reply would show
+  // its telemetry twice.
+  const turnsWithReply = useMemo(
+    () => new Set(optimistic.filter((m) => m.senderType === 'agent' && m.turnId).map((m) => m.turnId!)),
+    [optimistic],
+  );
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -60,14 +99,14 @@ export function ChatSurface({
   useEffect(() => {
     const supabase = createClient();
     const channel = supabase
-      .channel(`chat:${chatId}`)
+      .channel(`chat:${chatId}:${Math.random().toString(36).slice(2)}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `chat_id=eq.${chatId}` },
         (payload) => {
           const row = payload.new as {
             id: string; sender_type: 'user' | 'agent'; sender_id: string | null;
-            content: string; created_at: string;
+            content: string; created_at: string; turn_id: string;
           };
           setMessages((current) => {
             if (current.some((m) => m.id === row.id)) return current;
@@ -82,6 +121,7 @@ export function ChatSurface({
                 senderColor: who?.color ?? 'var(--agent)',
                 content: row.content,
                 createdAt: row.created_at,
+                turnId: row.turn_id,
               },
             ];
           });
@@ -97,7 +137,7 @@ export function ChatSurface({
   useEffect(() => {
     const supabase = createClient();
     const revocation = supabase
-      .channel(`membership:${meId}`)
+      .channel(`membership:${meId}:${Math.random().toString(36).slice(2)}`)
       .on('broadcast', { event: 'revoked' }, (msg) => {
         const payload = msg.payload as { chatId?: string };
         if (payload?.chatId && payload.chatId !== chatId) return;
@@ -136,6 +176,16 @@ export function ChatSurface({
         if (!res.ok) throw new Error(await res.text());
         // The persisted row arrives over Realtime and replaces the draft there,
         // so nothing is appended here — appending would double it.
+        //
+        // The turn id arrives here, synchronously, well before the reply does
+        // (the turn runs in after() and may take seconds). Recording it against
+        // the draft is what lets a live trace attach to the user's OWN message
+        // the instant it is sent, rather than only once a reply exists to hang
+        // it on.
+        const json = await res.json().catch(() => null) as { turnId?: string } | null;
+        if (json?.turnId) {
+          setPendingTurns((cur) => ({ ...cur, [clientMessageId]: json.turnId! }));
+        }
       } catch {
         setMessages((current) => [...current, { ...draft, pending: false, failed: true }]);
       }
@@ -156,14 +206,30 @@ export function ChatSurface({
   }
 
   return (
-    <div className="flex h-[calc(100vh-16rem)] min-h-[24rem] flex-col">
+    <div className={containerClassName}>
       <div className="flex-1 space-y-4 overflow-y-auto pr-1">
         {optimistic.length === 0 && (
           <p className="py-12 text-center text-sm text-muted">No messages yet.</p>
         )}
-        {optimistic.map((m) => (
-          <MessageRow key={m.id} message={m} isMe={m.senderId === meId} />
-        ))}
+        {optimistic.map((m) => {
+          const pendingId = m.pending && m.id.startsWith('pending:') ? m.id.slice('pending:'.length) : null;
+          const turnId = m.turnId ?? (pendingId ? pendingTurns[pendingId] : undefined);
+          // A turn that already produced a spoken reply shows its trace under
+          // THAT message. A user's own message only carries the trace while no
+          // reply exists yet — still running, or resolved silent.
+          const showTrace =
+            turnId !== undefined && (m.senderType === 'agent' || !turnsWithReply.has(turnId));
+          return (
+            <MessageRow
+              key={m.id}
+              message={m}
+              isMe={m.senderId === meId}
+              turnId={showTrace ? turnId : undefined}
+              initialEvents={turnId ? eventsByTurn[turnId] : undefined}
+              initialCalls={turnId ? callsByTurn[turnId] : undefined}
+            />
+          );
+        })}
         <div ref={bottomRef} />
       </div>
       <Composer chatId={chatId} onSend={send} />
@@ -171,7 +237,19 @@ export function ChatSurface({
   );
 }
 
-function MessageRow({ message, isMe }: { message: UiMessage; isMe: boolean }) {
+function MessageRow({
+  message,
+  isMe,
+  turnId,
+  initialEvents,
+  initialCalls,
+}: {
+  message: UiMessage;
+  isMe: boolean;
+  turnId?: string;
+  initialEvents?: EventRow[];
+  initialCalls?: CallRow[];
+}) {
   const isAgent = message.senderType === 'agent';
 
   // The agent is aligned right with a monochrome treatment and a monospace
@@ -197,6 +275,14 @@ function MessageRow({ message, isMe }: { message: UiMessage; isMe: boolean }) {
         >
           <MessageContent content={message.content} />
         </div>
+        {turnId && (
+          <TurnTrace
+            turnId={turnId}
+            initialEvents={initialEvents}
+            initialCalls={initialCalls}
+            pendingSend={message.senderType === 'user'}
+          />
+        )}
         {message.failed && (
           <span className="mt-1 block text-xs text-danger">Not sent.</span>
         )}
@@ -214,13 +300,29 @@ function Composer({
   const [value, setValue] = useState('');
   const [uploading, setUploading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // Dismissible independently of `value`, so backspacing out of "/research "
+  // after picking it does not reopen the menu on every keystroke.
+  const [menuDismissed, setMenuDismissed] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const suggestions = menuDismissed ? [] : matchingCommands(value);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     const text = value.trim();
     if (!text) return;
     setValue('');
+    setMenuDismissed(false);
     await onSend(text);
+  }
+
+  function pickCommand(usage: string) {
+    // Position the cursor right after "/research ", ready to type the question,
+    // rather than leaving the user to click back into the field.
+    const withSpace = usage.replace(/<[^>]+>$/, '').trimEnd() + ' ';
+    setValue(withSpace);
+    setMenuDismissed(true);
+    inputRef.current?.focus();
   }
 
   async function upload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -265,12 +367,40 @@ function Composer({
             className="hidden"
           />
         </label>
-        <input
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder="Message — @quorum to address the agent, /research … for a deeper answer"
-          className="flex-1 rounded-lg border border-border bg-surface px-3 py-2.5 text-sm outline-none transition focus:border-accent"
-        />
+        <div className="relative flex-1">
+          {suggestions.length > 0 && (
+            <ul
+              role="listbox"
+              // z-50: the floating-panel host sits at z-40 (see
+              // floating-panels/host.tsx). Without an explicit z-index here this
+              // popup renders BEHIND an open panel — found by actually opening
+              // one and typing "/" on the page underneath it, not by inspecting
+              // either component in isolation.
+              className="absolute bottom-full left-0 z-50 mb-1 w-full overflow-hidden rounded-lg border border-border bg-surface-raised shadow-lg"
+            >
+              {suggestions.map((c) => (
+                <li key={c.name}>
+                  <button
+                    type="button"
+                    onClick={() => pickCommand(c.usage)}
+                    className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-xs transition hover:bg-accent-soft"
+                  >
+                    <span className="font-mono text-foreground">{c.usage}</span>
+                    <span className="text-muted">{c.description}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <input
+            ref={inputRef}
+            value={value}
+            onChange={(e) => { setValue(e.target.value); setMenuDismissed(false); }}
+            onKeyDown={(e) => { if (e.key === 'Escape') setMenuDismissed(true); }}
+            placeholder="Message — @quorum to address the agent, / for commands"
+            className="w-full rounded-lg border border-border bg-surface px-3 py-2.5 text-sm outline-none transition focus:border-accent"
+          />
+        </div>
         <button
           type="submit"
           disabled={!value.trim()}
@@ -279,13 +409,12 @@ function Composer({
           Send
         </button>
       </form>
-      {value.trim().toLowerCase().startsWith('/research') && (
-        <p className="mt-2 text-xs text-muted">
-          Research runs a longer, multi-step turn: the agent reads the documents
-          attached here before answering, and cites what it used. It skips the
-          usual &ldquo;should I speak?&rdquo; check, because you asked directly.
-        </p>
-      )}
+      {suggestions.length === 0 &&
+        SLASH_COMMANDS.some((c) => value.trim().toLowerCase().startsWith(c.name)) && (
+          <p className="mt-2 text-xs text-muted">
+            {SLASH_COMMANDS.find((c) => value.trim().toLowerCase().startsWith(c.name))?.description}
+          </p>
+        )}
     </div>
   );
 }

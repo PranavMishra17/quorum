@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { createClient, requireActor } from '@/lib/db/server';
 import { NewChat, type Person, type ClearanceOption } from '@/app/_components/new-chat';
+import { PopOutButton } from '@/app/_components/floating-panels/pop-out-button';
 import { namesFor } from '@/lib/db/profiles';
 
 export const metadata = { title: 'Chats' };
@@ -109,16 +110,24 @@ export default async function ChatsPage() {
           <EmptyState />
         ) : (
           <ul className="grid gap-2 sm:grid-cols-2">
-            {joined.map((c) => (
-              <li key={c.id}>
-                <Link
-                  href={`/chat/${c.id}`}
-                  className="block rounded-lg border border-border bg-surface p-4 transition hover:border-accent"
-                >
-                  <ChatHeading chat={c} members={namesByChat.get(c.id) ?? []} />
-                </Link>
-              </li>
-            ))}
+            {joined.map((c) => {
+              const title = c.name ?? (c.type === 'dm' ? 'Direct message' : 'Untitled');
+              return (
+                <li key={c.id} className="relative">
+                  <Link
+                    href={`/chat/${c.id}`}
+                    className="block rounded-lg border border-border bg-surface p-4 pr-9 transition hover:border-accent"
+                  >
+                    <ChatHeading chat={c} members={namesByChat.get(c.id) ?? []} />
+                  </Link>
+                  <PopOutButton
+                    chatId={c.id}
+                    title={title}
+                    className="absolute right-2 top-2"
+                  />
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>
