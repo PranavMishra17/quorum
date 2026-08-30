@@ -1,68 +1,198 @@
-import { describe, it } from 'vitest';
+import { describe, it, expect } from 'vitest';
+import { GATE } from '@/config';
+import { evaluateChain, mentionsAgent, withinCooldown, type GateInput } from '@/lib/agent/gate';
 
 /**
- * The response gate.
+ * The deterministic chain is tested exhaustively BECAUSE it is deterministic.
+ * The judge is not tested for taste — only for its contract, elsewhere.
  *
- * The deterministic chain is a pure function of (message, chat state) — no
- * database, no model — which is precisely why the cases that matter most are
- * provable rather than merely observed. Rules 1 and 5 in particular are the
- * ones a purely LLM-driven gate could never guarantee.
- *
- * The judge is non-deterministic and is tested differently: stubbed at the
- * lib/llm/provider.ts boundary, with fixed transcripts and expected verdicts.
- * No test in this suite makes a live model call — the supplied key is
- * short-lived, and a suite that dies with a key is not a suite.
+ * These need no database and no API key.
  */
-describe('deterministic gate chain', () => {
-  describe('rule 1 — loop guard', () => {
-    it.todo('the agent never responds to its own message');
-    it.todo('rule 1 wins even when the agent message mentions the agent');
+
+const NOW = new Date('2026-08-30T12:00:00Z');
+
+function input(over: Partial<GateInput> = {}): GateInput {
+  return {
+    message: { senderType: 'user', senderId: 'u1', content: 'hello everyone' },
+    chatType: 'group',
+    humanMemberCount: 4,
+    lastAgentMessageAt: null,
+    repliesToAgent: false,
+    now: NOW,
+    ...over,
+  };
+}
+
+describe('rule 1 — never respond to yourself', () => {
+  it('is silent when the sender is the agent', () => {
+    const r = evaluateChain(input({ message: { senderType: 'agent', senderId: null, content: 'hi' } }));
+    expect(r).toMatchObject({ decided: true, verdict: 'silent', rule: 'self' });
   });
 
-  describe('rule 2 — agent chat', () => {
-    it.todo('the agent always responds in a chat of type agent');
-  });
-
-  describe('rules 3 and 4 — explicitly addressed', () => {
-    it.todo('the agent responds when mentioned by name');
-    it.todo('mention matching is case-insensitive');
-    it.todo('a mention inside a larger word does not count as a mention');
-    it.todo('the agent responds to a reply to one of its own messages');
-  });
-
-  describe('rule 5 — two-human DM', () => {
-    it.todo('the agent stays silent in a DM when not addressed');
-    it.todo('the agent responds in a DM when explicitly mentioned');
-  });
-
-  describe('rule 6 — cooldown', () => {
-    it.todo('the cooldown suppresses a rapid second response');
-    it.todo('an explicit mention overrides the cooldown');
-    it.todo('the cooldown expires after the configured window');
-  });
-
-  describe('ordering', () => {
-    it.todo('the first matching rule wins and later rules are not evaluated');
-    it.todo('every evaluation records which rule fired');
+  it('beats EVERY other rule — an agent that can be provoked into answering itself loops forever', () => {
+    const r = evaluateChain(input({
+      message: { senderType: 'agent', senderId: null, content: '@quorum what do you think?' },
+      chatType: 'agent',
+      repliesToAgent: true,
+    }));
+    expect(r).toMatchObject({ verdict: 'silent', rule: 'self' });
   });
 });
 
-describe('gate judge', () => {
-  it.todo('unaddressed group messages fall through to the judge');
-  it.todo('the agent stays silent in a group chat when not addressed');
-  it.todo('a judge verdict below the speak threshold results in silence');
-  it.todo('a judge timeout results in silence');
-  it.todo('a malformed judge response results in silence');
-  it.todo('the judge is never called when a deterministic rule matched');
+describe('rule 2 — an agent chat is a direct conversation', () => {
+  it('responds to anything', () => {
+    const r = evaluateChain(input({ chatType: 'agent', humanMemberCount: 1 }));
+    expect(r).toMatchObject({ verdict: 'respond', rule: 'agent_chat' });
+  });
+
+  it('responds even inside the cooldown', () => {
+    const r = evaluateChain(input({
+      chatType: 'agent', humanMemberCount: 1,
+      lastAgentMessageAt: new Date(NOW.getTime() - 1000),
+    }));
+    expect(r).toMatchObject({ verdict: 'respond', rule: 'agent_chat' });
+  });
 });
 
-describe('observability', () => {
-  it.todo('every gate evaluation writes a gate_evaluated event');
-  it.todo('a silent verdict still writes an event');
-  it.todo('the event records the verdict, the rule that fired, and the reason');
+describe('rule 3 — mentions', () => {
+  it.each(GATE.mentionTokens)('responds to the token %s', (token) => {
+    const r = evaluateChain(input({
+      message: { senderType: 'user', senderId: 'u1', content: `hey ${token}, thoughts?` },
+    }));
+    expect(r).toMatchObject({ verdict: 'respond', rule: 'mention' });
+  });
+
+  it('is case-insensitive', () => {
+    expect(mentionsAgent('QUORUM, are you there')).toBe(true);
+    expect(mentionsAgent('@QuOrUm hello')).toBe(true);
+  });
+
+  it('does NOT fire on a word that merely contains the token', () => {
+    // The failure this prevents: an agent that answers because someone used a
+    // word in passing is exactly what the gate exists to stop.
+    expect(mentionsAgent('we lack a quorums count')).toBe(false);
+    expect(mentionsAgent('inquorum is not a word but still')).toBe(false);
+    expect(mentionsAgent('@quorumbot is a different bot')).toBe(false);
+  });
+
+  it('fires on sensible punctuation around the token', () => {
+    expect(mentionsAgent('quorum: what next?')).toBe(true);
+    expect(mentionsAgent('(quorum)')).toBe(true);
+    expect(mentionsAgent('...quorum!')).toBe(true);
+  });
+
+  it('overrides the cooldown — a second mention must not be ignored', () => {
+    const r = evaluateChain(input({
+      message: { senderType: 'user', senderId: 'u1', content: '@quorum again please' },
+      lastAgentMessageAt: new Date(NOW.getTime() - 1000),
+    }));
+    expect(r).toMatchObject({ verdict: 'respond', rule: 'mention' });
+  });
+
+  it('overrides the unaddressed-DM rule', () => {
+    const r = evaluateChain(input({
+      chatType: 'dm', humanMemberCount: 2,
+      message: { senderType: 'user', senderId: 'u1', content: 'quorum, settle this for us' },
+    }));
+    expect(r).toMatchObject({ verdict: 'respond', rule: 'mention' });
+  });
 });
 
-describe('rate limiting', () => {
-  it.todo('rate limiting applies above the gate, even to explicit mentions');
-  it.todo('a rate-limited turn is visible in agent_events rather than silent');
+describe('rule 4 — a reply to the agent', () => {
+  it('responds', () => {
+    const r = evaluateChain(input({ repliesToAgent: true }));
+    expect(r).toMatchObject({ verdict: 'respond', rule: 'reply_to_agent' });
+  });
+
+  it('overrides the cooldown', () => {
+    const r = evaluateChain(input({
+      repliesToAgent: true,
+      lastAgentMessageAt: new Date(NOW.getTime() - 1000),
+    }));
+    expect(r).toMatchObject({ verdict: 'respond', rule: 'reply_to_agent' });
+  });
+});
+
+describe('rule 5 — a DM between two humans', () => {
+  it('stays silent when not addressed', () => {
+    // Present, but not a participant in someone else's private conversation.
+    const r = evaluateChain(input({ chatType: 'dm', humanMemberCount: 2 }));
+    expect(r).toMatchObject({ verdict: 'silent', rule: 'unaddressed_dm' });
+  });
+
+  it('does not apply to a group', () => {
+    const r = evaluateChain(input({ chatType: 'group', humanMemberCount: 2 }));
+    expect(r).toMatchObject({ decided: false, rule: 'fallthrough' });
+  });
+});
+
+describe('rule 6 — cooldown', () => {
+  it('suppresses a rapid second response', () => {
+    const r = evaluateChain(input({ lastAgentMessageAt: new Date(NOW.getTime() - 5_000) }));
+    expect(r).toMatchObject({ verdict: 'silent', rule: 'cooldown' });
+  });
+
+  it('expires exactly at the configured boundary', () => {
+    const ms = GATE.cooldownSeconds * 1000;
+    expect(withinCooldown(new Date(NOW.getTime() - (ms - 1)), NOW)).toBe(true);
+    expect(withinCooldown(new Date(NOW.getTime() - ms), NOW)).toBe(false);
+  });
+
+  it('does not apply when the agent has never spoken', () => {
+    expect(withinCooldown(null, NOW)).toBe(false);
+  });
+
+  it('ignores a timestamp in the future rather than suppressing forever', () => {
+    // Clock skew between the database and the runtime must not mute the agent.
+    expect(withinCooldown(new Date(NOW.getTime() + 60_000), NOW)).toBe(false);
+  });
+});
+
+describe('fallthrough', () => {
+  it('defers to the judge for an unaddressed group message', () => {
+    const r = evaluateChain(input());
+    expect(r).toEqual({
+      decided: false, rule: 'fallthrough', reason: 'no deterministic rule applied',
+    });
+  });
+
+  it('defers for a group DM-like chat with more than two people', () => {
+    const r = evaluateChain(input({ chatType: 'dm', humanMemberCount: 3 }));
+    expect(r.decided).toBe(false);
+  });
+});
+
+describe('the chain is pure', () => {
+  it('gives the same answer for the same input', () => {
+    const i = input({ lastAgentMessageAt: new Date(NOW.getTime() - 5_000) });
+    expect(evaluateChain(i)).toEqual(evaluateChain(i));
+  });
+
+  it('takes its clock as an argument, so cooldown behaviour is testable', () => {
+    const last = new Date(NOW.getTime() - 5_000);
+    const soon = evaluateChain(input({ lastAgentMessageAt: last }));
+    const later = evaluateChain(input({
+      lastAgentMessageAt: last,
+      now: new Date(NOW.getTime() + GATE.cooldownSeconds * 1000),
+    }));
+    expect(soon).toMatchObject({ verdict: 'silent', rule: 'cooldown' });
+    expect(later.decided).toBe(false);
+  });
+
+  it('every decided outcome carries a rule and a human-readable reason', () => {
+    const cases: GateInput[] = [
+      input({ message: { senderType: 'agent', senderId: null, content: 'x' } }),
+      input({ chatType: 'agent' }),
+      input({ message: { senderType: 'user', senderId: 'u1', content: '@quorum hi' } }),
+      input({ repliesToAgent: true }),
+      input({ chatType: 'dm', humanMemberCount: 2 }),
+      input({ lastAgentMessageAt: new Date(NOW.getTime() - 1000) }),
+    ];
+    for (const c of cases) {
+      const r = evaluateChain(c);
+      expect(r.decided).toBe(true);
+      expect(r.rule).toBeTruthy();
+      expect(r.reason.length).toBeGreaterThan(10);
+    }
+  });
 });
