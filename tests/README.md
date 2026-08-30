@@ -26,10 +26,18 @@ tools/
 ## Running
 
 ```bash
-pnpm test          # once
+pnpm test          # once — unit + integration, skips DB suites without DATABASE_URL
 pnpm test:watch    # watch mode
-pnpm check         # boundaries + lint + tests, same as CI
+pnpm test:rls      # policy tests against a local Postgres (needs Docker)
+pnpm check         # boundaries + lint + tests, same as the CI `check` job
 ```
+
+> **`pnpm test` passing does not mean the authorization claims are verified.**
+> Without a database the RLS and authorization suites skip, and a silent skip is
+> indistinguishable from a pass — which would make the most important tests in
+> this repository the ones nobody runs. `tests/global-setup.ts` prints a loud
+> warning when `DATABASE_URL` is unset, and the `database` job in CI is what
+> actually runs them.
 
 ## Current state
 

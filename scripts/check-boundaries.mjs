@@ -92,6 +92,16 @@ for (const dir of SCAN_DIRS) {
 
       lines.forEach((line, i) => {
         // Comments explain the rules; they are not violations of them.
+        // Includes JSDoc continuation lines (` * ...`), which is where the
+        // rules themselves tend to be written and where this first misfired.
+        const trimmed = line.trim();
+        if (
+          trimmed.startsWith('*') ||
+          trimmed.startsWith('//') ||
+          trimmed.startsWith('/*')
+        ) {
+          return;
+        }
         const code = line.replace(/\/\/.*$/, '').replace(/\/\*.*?\*\//g, '');
         if (rule.pattern.test(code)) {
           violations.push({ rule, file: rel, line: i + 1, text: line.trim() });

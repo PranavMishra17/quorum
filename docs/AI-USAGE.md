@@ -197,6 +197,49 @@ along — the prose was right and the config was wrong.
 **The honest summary.** The design survived. The *documentation of the design*
 did not, and the gap between those two is where a take-home is actually lost.
 
+### Session 5 — folding in the Band B/C findings
+
+**The one that mattered.** The synthesis found a **fail-open in the project's own
+central rule**. "Every active member of C2 was in the audience snapshot" is
+*vacuously true* when C2 has no active members — `NOT EXISTS` over an empty set
+in SQL, `Array.every` over an empty array in JavaScript. Implemented naively, a
+fully vacated chat retrieves **every memory item in the system**.
+
+That is the exact leak this project exists to prevent, arriving through the front
+door of the rule that prevents it. I had written that rule, argued for it at
+length, and not seen it. It is now the highest-priority test in
+`tests/memory/isolation.test.ts`.
+
+**Second-order finding worth recording** because the general literature does not
+cover it: extraction runs on the model's own reply, so an injected instruction
+that makes the model assert a false fact about a user **plants that lie into
+memory**, where it surfaces — correctly authorised — indefinitely. Generic
+injection analysis misses this because generic systems do not remember. Anything
+extracted from a turn that touched untrusted content is now forced to `inferred`
+and below threshold, landing as `candidate`.
+
+**Also corrected:** `messages.turn_id` was missing, so the idempotency step had
+nothing to return; `llm_calls` needed `status` + timestamps so the row can be
+written *before* the billed call; the pipeline diagram implied an atomicity
+`supabase-js` cannot deliver (no multi-statement transaction — it is now one
+`SECURITY DEFINER` RPC); `getSession()` must be `getClaims()` server-side;
+`middleware.ts` is `proxy.ts` in Next 16 and is UX, not a guard; and the space
+view is SVG, not canvas.
+
+**D-023 was resolved by asking rather than guessing.** The clearance rungs were
+named for teams, which conflated "who is in the room" with "how sensitive the
+material is" and produced a real ordering bug. I proposed three options; the
+answer was that the team names were only ever examples of clearance levels, so
+the ladder became pure sensitivity. Worth noting because the *research* found
+the bug but could not have supplied the intent.
+
+**How I checked the checker.** `scripts/check-boundaries.mjs` false-positived on
+a JSDoc line that merely *mentions* `memory_items` while explaining the rule. I
+fixed the comment stripper — and then verified with a **negative control**:
+appended a genuine `supabase.from('memory_items')` call, confirmed it still
+failed, and removed it. A validation script loosened without re-proving it still
+catches the thing it exists to catch is worse than no script.
+
 ---
 
 ## Sessions to come

@@ -119,6 +119,27 @@ export const MEMORY = {
      * the user-visible turn fast and off the serverless timeout cliff.
      */
     deferred: true,
+
+    /**
+     * MEMORY-WRITE PLANTING — a delayed-fuse leak unique to a system that
+     * persists what it learns.
+     *
+     * Extraction reads the model's own reply. An injected instruction in a
+     * fetched document that makes the model assert a false fact about a user
+     * plants that lie into `memory_items`, where it then surfaces — correctly
+     * authorised, indefinitely — in every chat the audience rule permits. The
+     * general prompt-injection literature does not cover this, because general
+     * systems do not remember.
+     *
+     * Mitigation: anything extracted from a turn that touched untrusted tool
+     * content is forced to `inferred` and below the confidence threshold, so it
+     * lands as `candidate` and is never retrieved. It stays visible in the
+     * internal view, so the attempt is auditable rather than merely dropped.
+     */
+    untrustedTurnPolicy: {
+      forceSourceType: 'inferred',
+      forceStatus: 'candidate',
+    },
   },
 
   lifecycle: {
@@ -222,14 +243,24 @@ export const RESEARCH_TOOL = {
 /**
  * Deliberately a small integer ladder rather than a real entitlement system.
  * It is enough to demonstrate that clearance is INDEPENDENT of membership:
- * the same set of people can share a level-3 and a level-1 chat, and a fact
+ * the same set of people can share a level-3 and a level-0 chat, and a fact
  * learned in the former must not surface in the latter.
+ *
+ * ONE DIMENSION ONLY: how sensitive the material is. Nothing here names a team,
+ * a department, or who is in the room.
+ *
+ * An earlier version had `external_audit` and `internal_exec` as rungs, which
+ * silently conflated two dimensions — "External Audit" describes *who is
+ * present*, not *how sensitive the content is*, and a monotone integer cannot
+ * express both. It also produced a concrete bug: an `internal` fact was
+ * eligible to surface into an `external_audit` chat purely because 2 > 1.
+ * Team membership is what `chat_members` is for. See D-023.
  */
 export const CLEARANCES = [
   { key: 'general', name: 'General', level: 0 },
   { key: 'internal', name: 'Internal', level: 1 },
-  { key: 'external_audit', name: 'External Audit', level: 2 },
-  { key: 'internal_exec', name: 'Internal Exec', level: 3 },
+  { key: 'confidential', name: 'Confidential', level: 2 },
+  { key: 'restricted', name: 'Restricted', level: 3 },
 ] as const;
 
 export const DEFAULT_CLEARANCE_LEVEL = 0;

@@ -28,7 +28,9 @@ Format per entry: **Context → Decision → Why → Status → Revisit if**.
 | D-020 | Judge returns a discrete verdict, not a thresholded float | settled (new, from R5) |
 | D-021 | No memory reflection/consolidation step in v1 | settled (new, from R4) |
 | D-022 | Least-privilege turn scoping after untrusted content | settled (new, from R7) |
-| D-023 | Clearance ladder ordering | **OPEN** — blocks the seed migration |
+| D-023 | Clearance ladder is one dimension: sensitivity | settled |
+| D-024 | `turn_id` and `request_id` both required; no traces table | settled (new, from R10) |
+| D-025 | Space view renders SVG, not canvas | settled (new, from R15) |
 | D-012 | Removed members lose access to history | settled (assumption) |
 | D-013 | Memory extraction is deferred, never inline | settled |
 | D-014 | Conflict resolution is deterministic, never delegated to the model | settled |
@@ -477,28 +479,67 @@ rather than something the automatic loop does.
 
 ---
 
-## D-023 — Clearance ladder ordering — **OPEN**
+## D-023 — The clearance ladder is one dimension: sensitivity
 
-**Context.** `config/agent.ts` orders `general(0) → internal(1) →
-external_audit(2) → internal_exec(3)`, and the comparison is a monotone
-`have.level >= required.level`.
+**Context.** The ladder was `general(0) → internal(1) → external_audit(2) →
+internal_exec(3)`, compared with a monotone `have.level >= required.level`.
 
-**The problem.** `external_audit` names **who is in the room**. The other three
-name **how sensitive the material is**. Those are different dimensions, and one
-integer cannot express both. As ordered, a fact marked `internal` (1) is eligible
-to surface in an `external_audit` chat (2) whenever audience containment happens
-to hold — an internal fact reaching a room with outsiders in it. Containment
-usually blocks this, but relying on the second axis to rescue a mis-modelled
-first axis is not the design the README describes.
+**The problem.** `external_audit` names **who is in the room**. The others name
+**how sensitive the material is**. One integer cannot express both, and the
+conflation produced a real bug: a fact marked `internal(1)` was eligible to
+surface into an `external_audit(2)` chat purely because 2 > 1 — an internal fact
+reaching a room with outsiders in it. Audience containment usually blocks that,
+but relying on the second axis to rescue a mis-modelled first axis is not the
+design the README describes.
 
-**Options.** (a) Reorder into pure sensitivity rungs — `general` / `internal` /
-`restricted` / `exec` — and model "external parties present" as a **chat
-attribute**, which is what it actually is. (b) Keep the current keys and state
-explicitly that the ladder is a sensitivity ordering in which `external_audit`
-sits where it does *because of what may be disclosed to auditors*.
+**Decision.** Pure sensitivity rungs: `general(0)` / `internal(1)` /
+`confidential(2)` / `restricted(3)`. Nothing in the ladder names a team, a
+department, or who is present.
 
-**Status.** OPEN, and **blocking `0008_seed_clearances.sql`** — migrations are
-append-only, so this must be decided before it is written, not after.
+**Why.** The team-flavoured names were only ever meant as *examples of clearance
+levels*, never as a hierarchy of groups. Teams are what `chat_members` models;
+sensitivity is what clearance models. Keeping each axis to one meaning is what
+lets the README claim they are independent without a caveat — and it keeps the
+demonstration of the authorisation axis simple, which was the whole point of
+D-003's "sufficient to demonstrate, not a real entitlement system".
+
+**Against.** A single sensitivity ladder cannot express compartmentalisation —
+real clearance systems are lattices, not ladders, precisely so that "Secret,
+Project A" does not imply "Secret, Project B". Quorum's ladder deliberately does
+not model that, and it should not be described as if it did.
+
+---
+
+## D-024 — `turn_id` and `request_id` are both required; no traces table
+
+**Decision.** `turn_id` correlates every row a turn produces across
+`agent_events` and `llm_calls`; `request_id` identifies the delivery attempt. A
+retry resumes the same `turn_id` under a new `request_id`. `messages.turn_id`
+closes the hole where the idempotency step had nothing to return.
+
+**No `traces` table** — the trace *is* the join. **No `tool_calls` table** — a
+tool span is a `tool_invoked` / `tool_result` pair sharing a `tool_call_id` in
+`payload`. Both follow from the extensibility charter on its own terms: a new
+event type costs no migration, a new table does.
+
+**Against.** Two ids is more ceremony than a 12-hour build strictly needs, and
+one could reconstruct attempts from timestamps. It stops being reconstructable
+the moment two attempts overlap, which is exactly when it matters.
+
+---
+
+## D-025 — The space view renders SVG, not canvas
+
+**Decision.** `d3-force` with SVG.
+
+**Why.** The original plan said canvas "since node counts can grow". They will
+not — this is a demo with a few hundred nodes at most, and canvas costs
+hand-rolled hit-testing and leaves nothing for a screen reader, in the feature
+that is *first to be cut* (D-017). Paying an implementation tax on the least
+graded surface is the wrong trade.
+
+**Against.** If node counts ever did grow past a few thousand, SVG's DOM cost
+becomes the bottleneck and this is a rewrite rather than a tune.
 
 ---
 

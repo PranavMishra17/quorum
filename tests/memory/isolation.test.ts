@@ -74,5 +74,24 @@ describe('memory isolation', () => {
     it.todo('an item with an empty audience snapshot surfaces nowhere');
 
     it.todo('an item with a null clearance level is treated as the highest level');
+
+    /**
+     * THE VACUOUS-TRUTH TRAP.
+     *
+     * "Every active member of C2 was in the audience snapshot" is TRUE when C2
+     * has no active members — `NOT EXISTS` over an empty set in SQL,
+     * `Array.every` over an empty array in JS. A naive implementation therefore
+     * lets a vacated chat retrieve EVERY memory item in the system, through the
+     * front door of the project's own central rule.
+     *
+     * This is the single highest-value test in the file.
+     */
+    it.todo(
+      'a chat with zero active members retrieves NOTHING — not everything',
+    );
+
+    it.todo(
+      'a chat whose last member was removed mid-turn retrieves nothing on the next read',
+    );
   });
 });

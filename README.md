@@ -55,7 +55,13 @@ stops it. Membership answers *who*; clearance answers *in what capacity*.
 
 Properties worth stating plainly:
 
-- **It fails closed.** Ambiguity resolves to not-surfacing.
+- **It fails closed — but only because one case is handled explicitly.**
+  "Every active member of C2 was in the audience snapshot" is *vacuously true*
+  when C2 has no active members, in SQL (`NOT EXISTS`) and in JavaScript
+  (`Array.every`) alike. Implemented naively, a fully vacated chat therefore
+  passes containment for **every memory item in the system** — the exact leak
+  this project exists to prevent, arriving through the front door of its own
+  central rule. Zero active members returns zero items, asserted by a test.
 - **It is cheap.** An anti-join over the audience snapshot plus an integer
   comparison — both indexed, both in the same query as the fetch.
 - **It is testable.** The isolation tests below are the ones that prove the thesis.
@@ -121,12 +127,22 @@ A gated group is unreachable by a user without **sufficient clearance level**,
 regardless of any membership row. The axes are independent by construction,
 which is exactly what makes the clearance floor meaningful in the memory rule.
 
-The precision matters: clearance is a **monotone integer ladder**, so a user
-holding only a *higher* level satisfies a *lower* requirement without holding
-that specific key. Whether the current ladder ordering is right is
-[D-023](docs/DECISIONS.md), still open — `external_audit` names *who is in the
-room*, which is not obviously the same dimension as *how sensitive the material
-is*, and one integer cannot express both.
+The precision matters: clearance is a **monotone integer ladder** —
+`general(0) / internal(1) / confidential(2) / restricted(3)` — so a user holding
+a *higher* level satisfies a *lower* requirement without holding that specific
+key.
+
+The ladder measures exactly one thing: **how sensitive the material is.** An
+earlier version had rungs named for teams (`external_audit`, `internal_exec`),
+which quietly conflated two dimensions — a team name describes *who is in the
+room*, not *how sensitive the content is* — and produced a real bug, where an
+`internal` fact was eligible to surface into an `external_audit` chat purely
+because 2 > 1. Teams are what `chat_members` models. See
+[D-023](docs/DECISIONS.md).
+
+The honest limit: real clearance systems are lattices, not ladders, so that
+"Secret, Project A" does not imply "Secret, Project B". Quorum's ladder does not
+model compartmentalisation and does not pretend to.
 
 ### Enforced at the data layer
 
@@ -213,6 +229,36 @@ for budget reasons, and token spend per call.
 This is deliberately the most prominent feature after the chat itself. A memory
 isolation rule you cannot see working is indistinguishable from one that does
 not work.
+
+## Tools and untrusted content *(planned)*
+
+File and web tools put attacker-controlled text into the model's context. The
+claim this project makes about that is deliberately narrow:
+
+> Tool output — file contents, search results — is untrusted **data**. It reaches
+> the model only inside a fenced, JSON-encoded `tool_result` block carrying
+> explicit provenance, and **a turn that has ingested untrusted tool content
+> cannot make a further externally-observable tool call outside a fixed
+> allowlist resolved outside model control.** The fence raises the cost of an
+> opportunistic attack; it is not a security boundary and is not claimed as one.
+> The boundary is the privilege rule, because that one is enforced in code
+> rather than in English.
+
+The reason for the narrowness: when twelve published injection defences were
+tested against *adaptive* attackers rather than static benchmarks, defences
+reporting near-zero attack success rates fell above 90%, with prompting-based
+defences — which is exactly what a delimiter is — at 95–99%. So "we are
+protected against prompt injection" is not a sentence anyone can honestly write,
+and it appears nowhere in this repository.
+
+One consequence is specific to a system that *remembers*, and it is worth
+stating because the general literature does not cover it. Extraction runs on the
+model's own reply, so an injected instruction that makes the model assert a false
+fact about a user would plant that lie into memory — correctly authorised,
+surfacing indefinitely. Anything extracted from a turn that touched untrusted
+content is therefore forced to `inferred` and below the confidence threshold, so
+it lands as `candidate` and is never retrieved, while staying visible in the
+internal view.
 
 ---
 
@@ -310,8 +356,9 @@ requirement, not because each one is obviously correct.
    Someone who joins later was not present when the thing was said.
 4. **Memory visibility never widens automatically.** Broadening requires an
    explicit act by the subject.
-5. **Clearances are an integer level plus a named key** — enough to demonstrate
-   the authorisation axis without modelling a real entitlement system.
+5. **Clearances are an integer level plus a named key, measuring sensitivity
+   only** — enough to demonstrate the authorisation axis without modelling a real
+   entitlement system. Not a lattice; no compartmentalisation.
 6. **Google is the only auth provider.** Authentication was explicitly permitted
    to be simplified; authorisation is where the effort went.
 7. **The gate biases toward silence when uncertain.**

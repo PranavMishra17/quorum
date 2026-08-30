@@ -54,18 +54,19 @@ chat_members          chat_id, user_id, role ('admin'|'member'),
                       status ('member'|'requested'|'invited'|'removed'),
                       joined_at, removed_at
 messages              id, chat_id, sender_type ('user'|'agent'), sender_id nullable,
-                      content, client_message_id (idempotency), created_at
+                      content, client_message_id (idempotency), turn_id, created_at
 memory_items          id, subject_user_id, origin_chat_id, origin_message_id,
                       content, search_vector tsvector, clearance_level int,
                       source_type ('stated'|'inferred'), confidence,
                       status ('candidate'|'active'|'superseded'|'stale'),
                       superseded_by, created_at, expires_at
 memory_audience       memory_item_id, user_id          ← the critical table
-agent_events          id, chat_id, turn_id, message_id nullable,
+agent_events          id, chat_id, turn_id, request_id, message_id nullable,
                       event_type, payload jsonb, created_at
-llm_calls             id, chat_id, turn_id, message_id, model, tier, purpose,
+llm_calls             id, chat_id, turn_id, request_id, message_id,
+                      model, tier, purpose, status ('started'|'succeeded'|'failed'),
                       input_tokens, output_tokens, cost_estimate,
-                      latency_ms, created_at
+                      started_at, finished_at, created_at
 files                 id, chat_id, uploader_id, storage_path, filename,
                       mime_type, size_bytes, created_at
 ```
@@ -80,9 +81,24 @@ in March was not in the room in January.
 `event_type` string and a new payload shape; it is not a migration. This is one
 of the seams that keeps tier-3 work from disturbing tier-1 work.
 
-**`turn_id` threads through `agent_events` and `llm_calls`.** One agent turn
-produces many rows across both tables; a correlation id is what turns them back
-into a single reconstructable trace. See research track R10.
+**`turn_id` and `request_id` are both required, and they are not the same
+thing.** One agent turn produces many rows across both tables, and `turn_id`
+joins them back into a single reconstructable trace — the trace *is* that join,
+which is why there is no `traces` table. `request_id` is the delivery attempt: a
+retry **resumes the same `turn_id` under a new `request_id`**, so without it the
+trace cannot distinguish "one turn, two delivery attempts" from "one attempt".
+
+**`llm_calls.status` exists so the row can be written *before* the network
+call.** A row written only on success is missing exactly when it matters most: a
+crash between "Anthropic charged us" and "row inserted" leaves no trace, and the
+retry pays again. That is a money bug, not a tidiness one — and `latency_ms`
+alone cannot be written before the call returns, which is why it is replaced by
+`started_at` / `finished_at`.
+
+**`messages.turn_id` closes a hole in the pipeline as originally drawn.** The
+idempotency step says "duplicate? return existing turn" — but nothing mapped
+`client_message_id` back to a `turn_id`. Without this column that step has
+nothing to return.
 
 ### Indexes on the hot paths
 
@@ -91,6 +107,8 @@ messages       (chat_id, created_at desc)
 chat_members   (user_id, status)
 chat_members   (chat_id, status)
 agent_events   (chat_id, created_at desc)
+agent_events   (turn_id, created_at)                          -- the trace join, in order
+llm_calls      (turn_id)                                      -- checked before every call
 memory_items   (subject_user_id, status)
 memory_items   USING gin (search_vector)                      -- lexical rank, D-004
 memory_audience(memory_item_id)
@@ -158,6 +176,42 @@ retry arriving after the message was persisted but before the reply was — wher
 the model call already succeeded and was already billed — is **out of scope for
 v1**, and is stated as a limitation rather than left looking like an oversight.
 See D-011, whose resume semantics remain open.
+
+### The diagram is not atomic, and cannot be drawn as if it were
+
+`supabase-js` has **no multi-statement transaction**. Every `.from()` call is its
+own implicit transaction, and Supavisor's transaction-mode pooling means session
+state does not survive between two of them. Read literally, the first three steps
+above are three separate transactions — which gives a check-then-insert race on
+`client_message_id`.
+
+The fix is one `SECURITY DEFINER` Postgres function, created in migration `0004`
+and called once via `.rpc()` from `lib/db/scoped-agent.ts`:
+
+```
+send_message_and_start_turn(chat_id, sender_id, content, client_message_id)
+  → REPEATABLE READ
+  → INSERT ... ON CONFLICT (chat_id, client_message_id) DO NOTHING
+  → returns the resolved turn_id, new or existing
+```
+
+This is the *only* place a transaction spans more than one statement, and it is
+deliberately short and database-only. It does **not** contradict D-009: the whole
+turn is not wrapped, because that would hold a connection open across the model
+call. Cost of the RPC: its callers need a `40001` serialization-failure retry.
+
+### What is deliberately not in the schema
+
+- **No `tool_calls` table.** A tool span is a `tool_invoked` / `tool_result` pair
+  of `agent_events` rows sharing a `tool_call_id` inside `payload`. A new event
+  type costs no migration; a new table does — the extensibility charter decides
+  this on its own terms.
+- **No `traces` table.** The trace is the join on `turn_id`.
+- **No queue table.** Deferred extraction is `after()` from `next/server` inside
+  the same invocation. It shares the invocation's timeout and is cancelled if the
+  function times out; Vercel documents no durability guarantee across instance
+  recycling. The entire durability story is one `memory_extraction_failed` event,
+  and that is said out loud rather than implied away.
 
 Every step writes to `agent_events`. Extraction runs *after* the response is
 delivered — it keeps the user-visible turn fast and off the serverless timeout
@@ -262,11 +316,13 @@ inherits authorisation from `ctx` **only under this invariant**.
 
 | Path | Tier | Responsibility |
 |---|---|---|
+| `proxy.ts` | t1 | Session refresh + redirect. **Next 16 renamed `middleware.ts`, and the name change is useful here:** this is UX, not a guard. CVE-2025-29927 let a spoofed header skip every middleware check — the lesson is thesis #2. RLS is the boundary. |
+| `app/auth/callback/route.ts` | t1 | PKCE `exchangeCodeForSession`. Must return `Cache-Control: private, no-store`, or a CDN can serve one user's session response to another. |
 | `(marketing)/page.tsx` | t1 | Landing + sign in with Google |
-| `(app)/layout.tsx` | t1 | Auth guard, profile bootstrap |
+| `(app)/layout.tsx` | t1 | Auth guard, profile bootstrap. Resolves the actor with **`getClaims()`, never `getSession()`** — Supabase says not to trust the latter server-side because it does not revalidate, and an authorisation decision made on it runs on a claim Supabase itself would reject. |
 | `(app)/chats/page.tsx` | t1 | **List view — ships first, remains the fallback** |
 | `(app)/chat/[chatId]/page.tsx` | t1 | Full-screen chat |
-| `(app)/space/page.tsx` | t3 | Force-directed bubble canvas |
+| `(app)/space/page.tsx` | t3 | Force-directed space view — **`d3-force` with SVG, not canvas.** Canvas costs hand-rolled hit-testing and accessibility work in the feature most likely to be cut; at a few hundred nodes SVG is fine. |
 | `api/chats/route.ts` | t1 | Create / list |
 | `api/chats/[chatId]/messages/route.ts` | t1 | Send message; idempotent on `client_message_id` |
 | `api/chats/[chatId]/members/route.ts` | t2 | Invite, request, approve, remove, promote |
@@ -279,15 +335,19 @@ Numbered, additive, never edited once applied. **Every table gets its RLS policy
 in the migration that creates it.**
 
 ```
-0001_extensions.sql          pgcrypto, vector
+0001_extensions.sql          pgcrypto
 0002_profiles_clearances.sql profiles, clearances, user_clearances + RLS
 0003_chats_members.sql       chats, chat_members + RLS + the membership predicate fn
 0004_messages.sql            messages + RLS + idempotency constraint
+                             + send_message_and_start_turn() RPC
 0005_agent_events.sql        agent_events, llm_calls + RLS
-0006_memory.sql              memory_items, memory_audience + DENY-ALL policies
+0006_memory.sql              memory_items, memory_audience
+                             RLS ON, NO permissive policy, grants revoked
 0007_files.sql               files + storage bucket policies
 0008_seed_clearances.sql     the clearance ladder from config/agent.ts
 ```
+
+No `vector` extension in `0001` — D-004 closed against embeddings in v1.
 
 The membership/clearance predicate is a `security definer` function so the
 policies stay readable and do not recurse through `chat_members` — a known RLS

@@ -10,7 +10,8 @@
     "check:boundaries": "node scripts/check-boundaries.mjs",
     "check": "pnpm check:boundaries && pnpm lint && pnpm test",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:rls": "supabase test db"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",
