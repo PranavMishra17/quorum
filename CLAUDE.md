@@ -59,17 +59,33 @@ researched, and tested-in-outline. There is no application code.
 
 | Exists | State |
 |---|---|
-| Next.js 16 / React 19 / TS / Tailwind scaffold | working, deployed-ready |
-| `config/` — models, agent thresholds, env | complete, 38 assertions passing |
-| `docs/` — ARCHITECTURE, DECISIONS, BUILD-PLAN, AI-USAGE, SETUP-* | complete |
-| `research/reports/` — 16 tracks + 2 syntheses, ~53k words | complete |
-| `tests/` — 7 suites, 38 passing + 104 `todo` | outline only |
-| CI — `.github/workflows/ci.yml`, boundary checker | green on GitHub |
-| `lib/`, `app/` beyond the scaffold, `supabase/migrations/` | **empty** |
+| Next.js 16 / React 19 / TS / Tailwind scaffold | working, deploy-ready |
+| `config/` — models, agent thresholds, env | complete |
+| `docs/` + `research/reports/` (16 tracks, ~53k words) | complete |
+| **`supabase/migrations/0001`–`0008`** | **complete — the whole schema** |
+| **Test harness — real Postgres 18.4, no Docker** | **complete** |
+| `tests/` — **138 passing**, 42 `todo` | authorization + memory done |
+| CI — `ci.yml`, boundary checker | green on GitHub |
+| **`lib/` and `app/` beyond the scaffold** | **empty — this is your job** |
 
 Repo: <https://github.com/PranavMishra17/quorum> (public).
 
-**Your job is Tier 1.** See §6.
+### The test harness, because it is unusual
+
+Docker is not installed on this machine, so `tests/global-setup.ts` starts a
+**real PostgreSQL 18.4** via `embedded-postgres` — genuine binaries, no
+container. The alternative (an in-JS Postgres emulator) does not implement RLS,
+and RLS is the thing under test.
+
+`tests/db/auth-shim.sql` recreates just enough of Supabase's `auth` surface that
+the **real migrations run unmodified**. Do not "simplify" a policy to make a
+test pass — the point is that what is tested is what ships.
+
+Three connection factories in `tests/db/harness.ts`: `asUser` and `asAnon` are
+for assertions; **`asSuper` is for fixtures only** — it bypasses RLS, so an
+assertion through it proves nothing.
+
+**Your job is the rest of Tier 1: `lib/` and `app/`.** See §6.
 
 ---
 
@@ -216,15 +232,19 @@ graded test file in the project.
 
 **Tier 1 (hours 0–5) — a submittable MVP.**
 
-| Hours | Work | Done when |
-|---|---|---|
-| 0–1 | Migrations `0001`–`0004`, Google auth | Sign-in works on the deployed URL |
-| 1–2.5 | Chats, members, messages, RLS, list UI | Two sessions converse; a third sees nothing |
-| 2.5–3.5 | `lib/llm/provider.ts` + `anthropic.ts`, `llm_calls`, `lib/events/log.ts` | A model call produces a cost row |
-| 3.5–5 | Gate chain + judge, `agent_events` | Agent answers when mentioned, silent in an unaddressed DM |
+| Hours | Work | Done when | |
+|---|---|---|---|
+| 0–1 | Migrations `0001`–`0008` + RLS harness | 138 assertions green against real Postgres | **DONE** |
+| 1–2 | Supabase client trio, Google auth, seeded dev login | Sign-in works on the deployed URL | next |
+| 2–3 | Chats/members/messages list UI | Two sessions converse; a third sees nothing | |
+| 3–4 | `lib/llm/provider.ts` + `anthropic.ts`, `llm_calls`, `lib/events/log.ts` | A model call produces a cost row | |
+| 4–5 | Gate chain + judge, `agent_events` | Agent answers when mentioned, silent in an unaddressed DM | |
 
-Write RLS policies **by hand and read them line by line.** Generated SQL that
-*looks* right is the highest-risk artifact in this repository.
+The schema is done and proven, so the risk has moved: the remaining Tier 1 work
+is application code that must not *route around* what the database already
+enforces. Concretely — read through `lib/db/server.ts` (session-bound, RLS
+applies) for everything a user does, and reach for `lib/db/scoped-agent.ts` only
+inside an agent turn.
 
 **Memory is deliberately absent from Tier 1.** A half-built memory system with
 no isolation is worse than none — it demonstrates the exact leak the project

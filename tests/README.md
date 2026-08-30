@@ -26,25 +26,62 @@ tools/
 ## Running
 
 ```bash
-pnpm test          # once — unit + integration, skips DB suites without DATABASE_URL
+pnpm test          # everything, including the RLS suites
 pnpm test:watch    # watch mode
-pnpm test:rls      # policy tests against a local Postgres (needs Docker)
 pnpm check         # boundaries + lint + tests, same as the CI `check` job
 ```
 
-> **`pnpm test` passing does not mean the authorization claims are verified.**
-> Without a database the RLS and authorization suites skip, and a silent skip is
-> indistinguishable from a pass — which would make the most important tests in
-> this repository the ones nobody runs. `tests/global-setup.ts` prints a loud
-> warning when `DATABASE_URL` is unset, and the `database` job in CI is what
-> actually runs them.
+No setup, no Docker, no `DATABASE_URL`. `pnpm test` starts a real Postgres,
+applies every migration, and runs the authorization suites against it.
+
+### The harness
+
+Docker is not installed on the development machine, so `tests/global-setup.ts`
+starts **PostgreSQL 18.4 via `embedded-postgres`** — genuine Postgres binaries,
+no container. The alternative, an in-JS Postgres emulator, does not implement
+row-level security, and RLS is the thing under test: a harness that cannot
+enforce a policy cannot verify one.
+
+`tests/db/auth-shim.sql` recreates just enough of Supabase's `auth` surface —
+`auth.users`, `auth.uid()` reading `request.jwt.claims`, the
+`anon`/`authenticated`/`service_role` roles — that the **real migrations run
+unmodified**. Policies rewritten to suit the test environment would be testing
+something other than what ships.
+
+It also reproduces Supabase's **default privileges**, and that detail decides
+whether any of this means anything: in a real project `authenticated` *does*
+hold table grants and RLS narrows them. Without the grants, a policy test would
+pass because the role lacked privilege rather than because the policy denied the
+row — every test green, none testing RLS.
+
+Three connection factories in `tests/db/harness.ts`:
+
+| | Use |
+|---|---|
+| `asUser(id)` | role `authenticated` + JWT claims. **Assert with this.** |
+| `asAnon()` | signed out. **Assert with this.** |
+| `asSuper()` | superuser. **Fixtures only** — it bypasses RLS, so an assertion through it proves nothing. |
+
+The first run initialises the data directory (~15s); later runs reuse it. The
+schema is dropped and rebuilt from the migrations every run, so no state carries
+between runs and a migration that only works against a warm database fails here
+rather than on deploy.
 
 ## Current state
 
-| | |
+| Suite | Passing |
 |---|---|
-| Passing | `config.test.ts` — 35 assertions |
-| `todo` | 102, across the six suites above |
+| `config.test.ts` | 42 |
+| `authorization/rls-foundation` | 13 |
+| `authorization/membership` | 17 |
+| `authorization/clearance` | 11 |
+| `authorization/messages` | 22 |
+| `memory/isolation` | 23 |
+| `tools/scoping` | 12 |
+| **Total** | **138 passing**, 42 `todo` |
+
+The `todo` entries that remain cover agent behaviour and memory lifecycle logic
+— the parts that need `lib/` code that does not exist yet.
 
 The `todo` entries are not placeholders in the pejorative sense. They are the
 test list from the README, committed as executable intent, so that the claims

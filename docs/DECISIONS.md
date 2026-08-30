@@ -31,6 +31,8 @@ Format per entry: **Context → Decision → Why → Status → Revisit if**.
 | D-023 | Clearance ladder is one dimension: sensitivity | settled |
 | D-024 | `turn_id` and `request_id` both required; no traces table | settled (new, from R10) |
 | D-025 | Space view renders SVG, not canvas | settled (new, from R15) |
+| D-026 | Idempotency RPC runs at READ COMMITTED, against R14's advice | settled |
+| D-027 | Discovery gated on clearance, not on membership | settled |
 | D-012 | Removed members lose access to history | settled (assumption) |
 | D-013 | Memory extraction is deferred, never inline | settled |
 | D-014 | Conflict resolution is deterministic, never delegated to the model | settled |
@@ -540,6 +542,60 @@ graded surface is the wrong trade.
 
 **Against.** If node counts ever did grow past a few thousand, SVG's DOM cost
 becomes the bottleneck and this is a rewrite rather than a tune.
+
+---
+
+## D-026 — The idempotency RPC runs at READ COMMITTED, not REPEATABLE READ
+
+**Context.** R14 recommended that the turn's write path be a `SECURITY DEFINER`
+function opened at `REPEATABLE READ`. The function was built; the isolation
+level was not.
+
+**Decision.** `send_message_and_start_turn()` runs at the default READ
+COMMITTED.
+
+**Why.** The recommendation was made about a *general* multi-table write path.
+This function does one thing: an idempotent insert keyed on
+`(chat_id, client_message_id)`. `ON CONFLICT DO NOTHING` resolves the only race
+that exists — two concurrent deliveries of the same key — and it resolves it at
+READ COMMITTED. Raising the isolation level would add `40001` serialization
+failures and a retry loop to every send, to buy nothing.
+
+Isolation earns its cost where a function reads several tables and must see one
+consistent snapshot across them. This one does not. Taking the recommendation
+because a report made it, without checking whether its premise applied, would
+have been cargo-culting.
+
+**Against.** If the function later grows to write `memory_items` and
+`memory_audience` atomically alongside the message — which is a plausible
+Tier 2 move — the premise changes and this decision must be revisited. The
+reasoning is recorded in the migration itself so that whoever extends it sees
+why the level is what it is.
+
+---
+
+## D-027 — Discovery is gated on clearance, but not on membership
+
+**Context.** Groups must be discoverable or the join-request flow cannot exist:
+you cannot ask to join something you cannot see. The first implementation made
+*every* group discoverable.
+
+**Decision.** A group is visible to a non-member only if they meet its clearance
+floor. DMs and agent chats are never discoverable.
+
+**Why.** The first version leaked the existence of clearance-gated rooms to
+everyone. The existence of a restricted conversation is itself disclosure —
+"there is a Restricted channel called Project Halifax" is information. Gating
+discovery on clearance but not membership keeps the join flow working while
+making the README's claim true of discovery and not only of content.
+
+**Found by writing the clearance tests**, not by review. The scenario only
+becomes obvious when you try to assert it.
+
+**Against.** A user who is a member of a gated chat but has *lost* the clearance
+can no longer see a chat they are still formally in, which is a confusing state
+to render in a UI. The alternative — showing it but refusing entry — discloses
+its existence, so the confusing state is the safer one.
 
 ---
 
