@@ -40,9 +40,11 @@ const SCHEMA = {
   properties: {
     verdict: { type: 'string', enum: [...GATE.judgeVerdicts] },
     reason: {
+      // No `maxLength`: Anthropic's structured outputs reject constraint
+      // keywords with a 400. The instruction carries the length, and a long
+      // reason is a cosmetic problem rather than a correctness one.
       type: 'string',
       description: 'One short sentence. Shown to users in the agent internal view.',
-      maxLength: 200,
     },
   },
 } as const;

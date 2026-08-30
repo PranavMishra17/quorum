@@ -4,6 +4,7 @@ import { createClient, requireActor } from '@/lib/db/server';
 import { ChatSurface, type UiMessage } from '@/app/_components/chat-surface';
 import { InternalView, type EventRow, type CallRow } from '@/app/_components/internal-view';
 import { Roster, type RosterMember } from '@/app/_components/roster';
+import { namesFor } from '@/lib/db/profiles';
 
 /**
  * A chat.
@@ -31,7 +32,7 @@ export default async function ChatPage({
 
   if (!chat) notFound();
 
-  const [{ data: messages }, { data: members }] = await Promise.all([
+  const [{ data: messages }, { data: members, error: memberError }] = await Promise.all([
     supabase
       .from('messages')
       .select('id, sender_type, sender_id, content, created_at')
@@ -42,9 +43,17 @@ export default async function ChatPage({
     // decides which rows are visible at all.
     supabase
       .from('chat_members')
-      .select('user_id, role, status, profiles:user_id(display_name, color)')
+      .select('user_id, role, status')
       .eq('chat_id', chatId),
   ]);
+
+  // Surfaced, not swallowed. Destructuring only `data` made a FAILED query look
+  // like an empty roster, and the page then told a member they were not one.
+  if (memberError) {
+    console.error('[chat] roster query failed', {
+      chatId, code: memberError.code, message: memberError.message,
+    });
+  }
 
   // A readable chat row with an unreadable roster means discovery-only access:
   // cleared for the group, but not a member of it.
@@ -52,23 +61,25 @@ export default async function ChatPage({
   // embedded relations as arrays regardless of cardinality.
   const roster = (members ?? []) as unknown as {
     user_id: string; role: 'admin' | 'member'; status: RosterMember['status'];
-    profiles: { display_name: string; color: string } | null;
   }[];
+
+  // Names come from a separate query — see lib/db/profiles.ts for why an embed
+  // cannot work here.
+  const profileMap = await namesFor(supabase, roster.map((m) => m.user_id));
   const me = roster.find((m) => m.user_id === actor.id);
   const amMember = me?.status === 'member';
   const amAdmin = amMember && me?.role === 'admin';
 
   const people: Record<string, { name: string; color: string }> = {};
   for (const m of roster) {
-    if (m.profiles && m.status === 'member') {
-      people[m.user_id] = { name: m.profiles.display_name, color: m.profiles.color };
-    }
+    const p = profileMap.get(m.user_id);
+    if (p && m.status === 'member') people[m.user_id] = p;
   }
 
   const rosterMembers: RosterMember[] = roster.map((m) => ({
     userId: m.user_id,
-    name: m.profiles?.display_name ?? 'Someone',
-    color: m.profiles?.color ?? 'var(--agent)',
+    name: profileMap.get(m.user_id)?.name ?? 'Someone',
+    color: profileMap.get(m.user_id)?.color ?? 'var(--agent)',
     role: m.role,
     status: m.status,
   }));

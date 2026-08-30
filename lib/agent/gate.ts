@@ -140,3 +140,5 @@ export function evaluateChain(input: GateInput): ChainResult {
   return {
     decided: false, rule: 'fallthrough',
     reason: 'no deterministic rule applied',
+  };
+}

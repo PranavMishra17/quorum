@@ -58,7 +58,9 @@ const RULES = [
     // grants and in test names ("...is service_role only"), and flagging those
     // trains people to rename around the checker rather than to respect it.
     pattern: /SUPABASE_SECRET_KEY/,
-    allow: ['config/env.ts', 'lib/db/scoped-agent.ts'],
+    // tests/config-env.test.ts is a test OF the env schema, so naming the
+    // key is its subject rather than a use of it.
+    allow: ['config/env.ts', 'lib/db/scoped-agent.ts', 'tests/config-env.test.ts'],
     why:
       'The service-role key bypasses RLS entirely. It may be referenced in ' +
       'exactly one runtime file (lib/db/scoped-agent.ts) plus the env schema.',

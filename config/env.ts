@@ -76,6 +76,27 @@ export function clientEnv(): ClientEnv {
 // Server — NEVER IMPORT FROM A CLIENT COMPONENT
 // ---------------------------------------------------------------------------
 
+/**
+ * An optional secret that may legitimately be BLANK.
+ *
+ * `.optional()` admits `undefined` — it does NOT admit `''`. A key declared in
+ * `.env.example` as `SEARCH_API_KEY=` is *present and empty*, which fails
+ * `.min(1)` and takes the whole schema down with it.
+ *
+ * That is not hypothetical. Copying `.env.example` to `.env.local` — the exact
+ * step the setup docs instruct — made `serverEnv()` throw, and because the
+ * agent turn resolves env lazily inside `after()`, EVERY TURN DIED SILENTLY
+ * with the user's message already persisted and no reply ever arriving. A blank
+ * optional key disabled the entire agent.
+ *
+ * So blank is normalised to absent, which is what "optional" was always meant
+ * to mean here.
+ */
+const optionalSecret = z.preprocess(
+  (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+  z.string().min(1).optional(),
+);
+
 const serverSchema = z.object({
   /**
    * Supabase secret (formerly "service role") key. Bypasses RLS entirely.
@@ -87,14 +108,14 @@ const serverSchema = z.object({
   ANTHROPIC_API_KEY: z.string().min(1),
 
   /** Optional web-search provider. Absent = the search tool is unavailable. */
-  SEARCH_API_KEY: z.string().min(1).optional(),
+  SEARCH_API_KEY: optionalSecret,
 
   /**
    * Optional embedding provider. Anthropic does not ship an embeddings API,
    * so semantic memory ranking needs a separate provider or a local model.
    * This is an open decision — see research track R3.
    */
-  EMBEDDING_API_KEY: z.string().min(1).optional(),
+  EMBEDDING_API_KEY: optionalSecret,
 
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 });
@@ -102,6 +123,24 @@ const serverSchema = z.object({
 export type ServerEnv = z.infer<typeof serverSchema>;
 
 let cached: ServerEnv | null = null;
+
+/**
+ * Parse an environment object. Pure, uncached, and exported so the rules above
+ * can be tested directly — a cached singleton reading `process.env` is
+ * effectively untestable, which is part of why the blank-key bug survived to
+ * production-like use.
+ */
+export function parseServerEnv(source: NodeJS.ProcessEnv): ServerEnv {
+  const parsed = serverSchema.safeParse(source);
+  if (!parsed.success) {
+    const missing = parsed.error.issues.map((i) => i.path.join('.')).join(', ');
+    throw new Error(
+      `Invalid or missing server environment variables: ${missing}. ` +
+        `Copy .env.example to .env.local and fill it in — see docs/SETUP-SUPABASE.md.`,
+    );
+  }
+  return parsed.data;
+}
 
 /** Throws on first call if server env is incomplete. Never call from the client. */
 export function serverEnv(): ServerEnv {

@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { createClient, requireActor } from '@/lib/db/server';
 import { NewChat, type Person, type ClearanceOption } from '@/app/_components/new-chat';
+import { namesFor } from '@/lib/db/profiles';
 
 export const metadata = { title: 'Chats' };
 
@@ -44,14 +45,20 @@ export default async function ChatsPage() {
 
   const { data: allMembers } = await supabase
     .from('chat_members')
-    .select('chat_id, profiles:user_id(display_name)')
+    .select('chat_id, user_id')
     .eq('status', 'member');
 
   const namesByChat = new Map<string, string[]>();
-  for (const r of (allMembers ?? []) as unknown as { chat_id: string; profiles: { display_name: string } | null }[]) {
-    if (!r.profiles) continue;
+  const dmNames = await namesFor(
+    supabase,
+    ((allMembers ?? []) as unknown as { user_id: string }[]).map((r) => r.user_id),
+  );
+
+  for (const r of (allMembers ?? []) as unknown as { chat_id: string; user_id: string }[]) {
+    const who = dmNames.get(r.user_id);
+    if (!who) continue;
     const list = namesByChat.get(r.chat_id) ?? [];
-    list.push(r.profiles.display_name);
+    list.push(who.name);
     namesByChat.set(r.chat_id, list);
   }
 

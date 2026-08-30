@@ -50,19 +50,29 @@ const SCHEMA = {
   properties: {
     items: {
       type: 'array',
-      maxItems: MEMORY.extraction.maxItemsPerTurn,
+      // NO CONSTRAINT KEYWORDS ANYWHERE IN THIS SCHEMA.
+      //
+      // Anthropic's structured outputs reject `maxItems`, `minimum`/`maximum`
+      // and friends with a 400 — "For 'array' type, property 'maxItems' is not
+      // supported". The rejection fails the whole extraction call, so every
+      // turn silently learned nothing while the reply looked fine.
+      //
+      // Every one of those bounds is enforced below instead: `isExtraction`
+      // checks the ranges and `slice(0, maxItemsPerTurn)` caps the count. That
+      // is where they belonged regardless — a schema keyword the provider may
+      // not honour is not a bound, it is a hope.
       items: {
         type: 'object',
         additionalProperties: false,
         required: ['subjectUserId', 'content', 'sourceType', 'confidence', 'volatile', 'supersedesId'],
         properties: {
           subjectUserId: { type: 'string', description: 'Must be one of the listed participant ids.' },
-          content: { type: 'string', maxLength: 300 },
+          content: { type: 'string' },
           sourceType: {
             type: 'string', enum: ['stated', 'inferred'],
             description: '"stated" only when the subject said it about themselves.',
           },
-          confidence: { type: 'number', minimum: 0, maximum: 1 },
+          confidence: { type: 'number' },
           volatile: { type: 'boolean', description: 'True for facts that go stale, e.g. current location or this week\'s task.' },
           supersedesId: {
             type: ['string', 'null'],

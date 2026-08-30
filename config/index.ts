@@ -9,4 +9,4 @@
 
 export * from './models';
 export * from './agent';
-export { clientEnv, serverEnv, isConfigured, type ClientEnv, type ServerEnv } from './env';
+export { clientEnv, serverEnv, parseServerEnv, isConfigured, type ClientEnv, type ServerEnv } from './env';
