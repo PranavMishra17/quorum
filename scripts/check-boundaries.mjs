@@ -66,8 +66,15 @@ const RULES = [
   {
     id: 'memory-queries',
     // CLAUDE.md non-negotiable #3.
-    pattern: /['"`](memory_items|memory_audience)['"`]/,
-    allow: ['lib/memory/', 'tests/memory/'],
+    //
+    // Matches a QUERY against a memory table, not a mention of its name. The
+    // name legitimately appears in generated database types, in derived row
+    // aliases, and in prose; flagging those teaches people to work around the
+    // checker instead of respecting it. What must not exist outside
+    // lib/memory/ is a way to READ the rows.
+    pattern:
+      /\.from\(\s*['"`](memory_items|memory_audience)['"`]|\b(?:from|into|update|join)\s+(?:public\.)?(?:memory_items|memory_audience)\b/i,
+    allow: ['lib/memory/', 'tests/memory/', 'tests/db/'],
     why:
       'One filter path means one place to audit and one place to test. A ' +
       'memory query outside lib/memory/ bypasses the audience + clearance filter.',

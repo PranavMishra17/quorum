@@ -2,6 +2,7 @@
 
 import { createBrowserClient } from '@supabase/ssr';
 import { clientEnv } from '@/config';
+import type { Database } from './types';
 
 /**
  * The browser client. Carries the publishable key, which ships in the bundle.
@@ -20,7 +21,7 @@ import { clientEnv } from '@/config';
  */
 export function createClient() {
   const env = clientEnv();
-  return createBrowserClient(
+  return createBrowserClient<Database>(
     env.NEXT_PUBLIC_SUPABASE_URL,
     env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
   );

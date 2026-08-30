@@ -1,5 +1,5 @@
 import { GATE } from '@/config';
-import type { ChatType } from '@/lib/db/types';
+import type { ChatType } from '@/lib/db/rows';
 
 /**
  * The response gate: should the agent speak?
@@ -140,5 +140,3 @@ export function evaluateChain(input: GateInput): ChainResult {
   return {
     decided: false, rule: 'fallthrough',
     reason: 'no deterministic rule applied',
-  };
-}

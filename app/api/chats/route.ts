@@ -53,12 +53,14 @@ export async function POST(request: NextRequest) {
       : null;
 
   const supabase = await createClient();
+  // `type` is validated against CHAT_TYPES above; name and clearance are
+  // genuinely optional, which generated RPC arg types do not model.
   const { data, error } = await supabase.rpc('create_chat', {
     p_type: type,
     p_name: name,
     p_member_ids: memberIds,
     p_required_clearance_id: requiredClearanceId,
-  });
+  } as never);
 
   if (error) {
     // 23514 is a CHECK violation — the shape rules (a DM has two people, a

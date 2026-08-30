@@ -27,7 +27,10 @@ export async function logEvent(
       request_id: ctx.requestId,
       message_id: messageId ?? null,
       event_type: eventType,
-      payload,
+      // Payload shapes are open by design (a new event type is not a
+      // migration), so the generated Json type is satisfied at the boundary
+      // rather than by narrowing every event's payload.
+      payload: payload as never,
     });
 
   if (error) {

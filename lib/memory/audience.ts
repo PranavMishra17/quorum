@@ -39,6 +39,8 @@ export async function learn(
 ): Promise<string | null> {
   const clearanceLevel = await ctx.clearanceLevel();
 
+  // Generated RPC arg types do not model SQL NULL; origin_message_id and
+  // expires_at are genuinely optional. See lib/db/rows.ts.
   const { data, error } = await ctx.privilegedClient().rpc('write_memory_item', {
     p_subject_user_id: params.subjectUserId,
     p_origin_chat_id: ctx.chatId,
@@ -49,7 +51,7 @@ export async function learn(
     p_confidence: params.confidence,
     p_status: params.status,
     p_expires_at: params.expiresAt,
-  });
+  } as never);
 
   if (error) return null;
   return data as unknown as string;

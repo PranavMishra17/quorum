@@ -1,5 +1,5 @@
 import { CONTEXT } from '@/config';
-import type { Message } from '@/lib/db/types';
+import type { Message } from '@/lib/db/rows';
 import type { ProviderMessage } from '@/lib/llm/provider';
 import { replyPrompt, type MemoryLine } from './prompts';
 

@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { clientEnv, serverEnv } from '@/config';
-import type { FileRow, Message } from './types';
+import type { Database, FileRow, Message } from './rows';
 
 /**
  * THE ONLY FILE PERMITTED TO READ THE SERVICE-ROLE KEY.
@@ -49,7 +49,7 @@ import type { FileRow, Message } from './types';
  */
 export class ScopedAgentContext {
   private constructor(
-    private readonly db: SupabaseClient,
+    private readonly db: SupabaseClient<Database>,
     /** The chat this turn is scoped to. Fixed at construction, never a parameter. */
     readonly chatId: string,
     /** The human whose message started this turn. */
@@ -269,7 +269,7 @@ export class ScopedAgentContext {
    * per-call authorisation checks above, so a caller takes on the job of doing
    * them. If you are writing a tool, use the domain methods instead.
    */
-  privilegedClient(): SupabaseClient {
+  privilegedClient(): SupabaseClient<Database> {
     return this.db;
   }
 }
@@ -286,10 +286,10 @@ export class NotAuthorisedError extends Error {
  * to obtain one from outside this file is through a ScopedAgentContext, which
  * means through a chat scope.
  */
-function createServiceClient(): SupabaseClient {
+function createServiceClient(): SupabaseClient<Database> {
   const publicEnv = clientEnv();
   const secrets = serverEnv();
-  return createClient(
+  return createClient<Database>(
     publicEnv.NEXT_PUBLIC_SUPABASE_URL,
     secrets.SUPABASE_SECRET_KEY,
     {
