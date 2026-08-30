@@ -14,13 +14,33 @@ import type { CallPurpose } from '@/config';
 
 export interface ProviderMessage {
   role: 'user' | 'assistant';
-  content: string;
+  /** A string, or raw content blocks when replaying a tool exchange. */
+  content: string | unknown[];
+}
+
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+}
+
+/** A tool call the model asked for. Never executed by this layer. */
+export interface ToolUse {
+  id: string;
+  name: string;
+  input: unknown;
 }
 
 export interface CompleteParams {
   purpose: CallPurpose;
   system?: string;
   messages: ProviderMessage[];
+  /**
+   * Tools to offer. The provider passes them through and reports back what the
+   * model asked for; it never executes anything. Execution belongs to
+   * ToolSession, which owns the bounds and the authorisation.
+   */
+  tools?: ToolDefinition[];
   /** Cancels the call. The orchestrator's wall clock lives here. */
   signal?: AbortSignal;
 }
@@ -43,6 +63,10 @@ export interface CompleteResult {
   usage: Usage;
   model: string;
   stopReason: string | null;
+  /** Tool calls the model requested, if any. */
+  toolUses?: ToolUse[];
+  /** Raw assistant content, needed verbatim when continuing a tool exchange. */
+  raw?: unknown[];
 }
 
 export interface StructuredResult<T> extends CompleteResult {

@@ -1,4 +1,4 @@
-import { KILL_SWITCHES, GATE, RATE_LIMITS, MEMORY } from '@/config';
+import { KILL_SWITCHES, GATE, RATE_LIMITS, MEMORY, TOOLS } from '@/config';
 import { ScopedAgentContext } from '@/lib/db/scoped-agent';
 import { logEvent } from '@/lib/events/log';
 import { AnthropicProvider } from '@/lib/llm/anthropic';
@@ -10,6 +10,7 @@ import { extractMemory } from '@/lib/memory/extract';
 
 import { evaluateChain, type GateDecision, type GateInput } from './gate';
 import { judge } from './judge';
+import { openToolSession, toolDefinition, type ToolSession } from './tools';
 
 /**
  * The agent turn.
@@ -89,13 +90,13 @@ export async function runTurn(params: TurnParams): Promise<TurnResult> {
       return { spoke: false, decision };
     }
 
-    const agentMessageId = await speak(ctx, params.messageId);
+    const { messageId: agentMessageId, session } = await speak(ctx, params.messageId);
 
     // Extraction runs AFTER the reply is persisted and broadcast (D-013). By
     // this point the user already has their answer, so a slow or failing
     // extraction costs nothing user-visible.
     if (KILL_SWITCHES.memoryWriteEnabled) {
-      await extractTurnMemory(ctx, agentMessageId);
+      await extractTurnMemory(ctx, agentMessageId, session?.touchedUntrustedContent ?? false);
     }
 
     await logEvent(ctx, 'turn_completed', {
@@ -225,8 +226,11 @@ async function renderTranscript(
   }));
 }
 
-/** Assemble, call the model, persist the reply. */
-async function speak(ctx: ScopedAgentContext, messageId: string): Promise<string> {
+/** Assemble, call the model, run the tool loop, persist the reply. */
+async function speak(
+  ctx: ScopedAgentContext,
+  messageId: string,
+): Promise<{ messageId: string; session: ToolSession | null }> {
   const [history, names, chat, memberIds] = await Promise.all([
     ctx.recentMessages(60),
     ctx.speakerNames(),
@@ -273,13 +277,54 @@ async function speak(ctx: ScopedAgentContext, messageId: string): Promise<string
   }
 
   const provider = instrument(new AnthropicProvider(), ctx, messageId);
-  const result = await provider.complete({
-    purpose: 'chat_response',
-    system: assembled.system,
-    messages: assembled.messages,
-  });
+  const session = openToolSession(ctx, messageId);
 
-  const text = result.text.trim();
+  // The conversation as the model sees it, growing as tools are used.
+  const messages = [...assembled.messages];
+  let text = '';
+
+  // The loop is bounded twice over: TOOLS.maxCallsPerTurn inside the session,
+  // and this iteration count outside it. Two bounds because they fail
+  // differently — the session's cap stops a runaway tool, this one stops a
+  // model that keeps asking for tools it has been refused.
+  for (let round = 0; round <= TOOLS.maxCallsPerTurn; round++) {
+    // Tools are recomputed EVERY round, not once. After untrusted content is
+    // read, the externally-observable ones disappear from the offer — the model
+    // is not asked to decline them, it is not shown them (D-022).
+    const offered = session?.availableTools() ?? [];
+
+    const result = await provider.complete({
+      purpose: 'chat_response',
+      system: assembled.system,
+      messages,
+      tools: offered.length ? offered.map(toolDefinition) : undefined,
+    });
+
+    if (result.text.trim()) text = result.text.trim();
+
+    if (!result.toolUses?.length || !session) break;
+
+    // Echo the assistant turn back verbatim, then answer every tool_use in ONE
+    // user message. Splitting them across messages silently trains the model
+    // out of making parallel calls.
+    messages.push({ role: 'assistant', content: result.raw ?? [] });
+
+    const results = [];
+    for (const use of result.toolUses) {
+      const outcome = await session.invoke(use.name, use.input);
+      results.push({
+        type: 'tool_result',
+        tool_use_id: use.id,
+        is_error: outcome.status !== 'ok',
+        content:
+          outcome.status === 'ok'
+            ? outcome.content
+            : `This tool did not run: ${outcome.reason}. Answer without it, and say so if it matters.`,
+      });
+    }
+    messages.push({ role: 'user', content: results });
+  }
+
   if (!text) {
     // An empty completion is not a reply. Writing it would put a blank bubble
     // in the chat, which reads as a bug rather than as restraint.
@@ -287,20 +332,21 @@ async function speak(ctx: ScopedAgentContext, messageId: string): Promise<string
   }
 
   const message = await ctx.writeAgentMessage(text);
-  return message.id;
+  return { messageId: message.id, session };
 }
 
 /**
  * Deferred extraction.
  *
- * `touchedUntrustedContent` is hardcoded false because no tool exists yet. It
- * is threaded through rather than omitted so that adding the first tool is a
- * change to one call site, not a search for where the flag should have gone —
- * and getting it wrong is T10, a fact planted into memory forever.
+ * `touchedUntrustedContent` comes from the turn's ToolSession. Getting it wrong
+ * is T10: a fact planted by injected content, stored as `active`, surfacing
+ * forever. When true, everything extracted is forced to `inferred` +
+ * `candidate` and is therefore never retrieved.
  */
 async function extractTurnMemory(
   ctx: ScopedAgentContext,
   agentMessageId: string,
+  touchedUntrustedContent: boolean,
 ): Promise<void> {
   const [history, names] = await Promise.all([
     ctx.recentMessages(MEMORY.extraction.contextMessages),
@@ -315,7 +361,7 @@ async function extractTurnMemory(
       content: m.content,
       isAgent: m.sender_type === 'agent',
     })),
-    touchedUntrustedContent: false,
+    touchedUntrustedContent,
     originMessageId: agentMessageId,
   });
 }

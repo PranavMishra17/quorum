@@ -102,6 +102,7 @@ export class AnthropicProvider implements LlmProvider {
         ...requestShape(tier),
         system: params.system,
         messages: params.messages,
+        ...(params.tools?.length ? { tools: params.tools } : {}),
       } as Parameters<Anthropic['messages']['create']>[0];
       const options = { signal: timeoutSignal(tier, params.signal) };
 
@@ -126,6 +127,11 @@ export class AnthropicProvider implements LlmProvider {
         throw new LlmError('refusal', 'the model declined this request');
       }
 
+      const toolUses = msg.content
+        .filter((b): b is { type: 'tool_use'; id: string; name: string; input: unknown } =>
+          typeof b === 'object' && b !== null && (b as { type?: string }).type === 'tool_use')
+        .map((b) => ({ id: b.id, name: b.name, input: b.input }));
+
       return {
         text: textOf(msg.content),
         usage: {
@@ -134,6 +140,8 @@ export class AnthropicProvider implements LlmProvider {
         },
         model: spec.id,
         stopReason: msg.stop_reason,
+        toolUses: toolUses.length ? toolUses : undefined,
+        raw: msg.content,
       };
     });
   }

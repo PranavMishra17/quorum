@@ -81,7 +81,7 @@ describe('the happy path', () => {
   it('shows the model the transcript it is judging', async () => {
     let prompt = '';
     const p = stubProvider(async (params) => {
-      prompt = params.messages[0].content;
+      prompt = String(params.messages[0].content);
       return { verdict: 'silent', reason: 'x' };
     });
     await judge(p, INPUT);

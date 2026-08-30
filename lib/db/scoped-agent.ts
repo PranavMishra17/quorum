@@ -202,6 +202,39 @@ export class ScopedAgentContext {
     return (data ?? []) as FileRow[];
   }
 
+  /**
+   * Read one file's bytes.
+   *
+   * `fileId` is a RESOURCE id, not a scope id — the distinction the invariant
+   * turns on. Scope still comes from construction: the lookup below is
+   * constrained by `this.chatId`, so a file id from another chat resolves to
+   * nothing no matter where the id came from.
+   *
+   * That is the confused-deputy fix in one line. Knowing a resource id must
+   * never be sufficient to read it, because tool input is model-controlled and
+   * therefore influenced by whatever the model has read.
+   */
+  async readFile(fileId: string): Promise<{ meta: FileRow; bytes: ArrayBuffer } | null> {
+    await this.assertActorAuthorised();
+
+    const { data, error } = await this.db
+      .from('files')
+      .select('*')
+      .eq('id', fileId)
+      .eq('chat_id', this.chatId) // ← scope, from construction
+      .maybeSingle();
+
+    if (error || !data) return null;
+    const meta = data as FileRow;
+
+    const { data: blob, error: downloadError } = await this.db.storage
+      .from('chat-files')
+      .download(meta.storage_path);
+
+    if (downloadError || !blob) return null;
+    return { meta, bytes: await blob.arrayBuffer() };
+  }
+
   // -------------------------------------------------------------------------
   // Writes
   // -------------------------------------------------------------------------

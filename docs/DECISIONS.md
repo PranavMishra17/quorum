@@ -35,6 +35,7 @@ Format per entry: **Context → Decision → Why → Status → Revisit if**.
 | D-027 | Discovery gated on clearance, not on membership | settled |
 | D-028 | No separate agent-turn endpoint; the turn runs in `after()` | settled |
 | D-029 | Streaming is a transport, not a UX feature | settled |
+| D-030 | Client-side web tools, not the server-side ones | settled |
 | D-012 | Removed members lose access to history | settled (assumption) |
 | D-013 | Memory extraction is deferred, never inline | settled |
 | D-014 | Conflict resolution is deterministic, never delegated to the model | settled |
@@ -663,6 +664,33 @@ usability cost, and "the agent is thinking" is exactly what streaming
 communicates. If this becomes the top complaint, the honest fix is a
 `message_streaming` table or a status column — additive, and leaving `messages`
 immutable — rather than making messages mutable.
+
+---
+
+## D-030 — Client-side web tools, not Anthropic's server-side ones
+
+**Context.** The API offers `web_search` and `web_fetch` as server-side tools
+that execute inside the model call. They are better implementations than the
+ones in `lib/agent/tools/web.ts` — better search, better extraction, maintained
+by someone else.
+
+**Decision.** Use our own anyway.
+
+**Why.** Content retrieved by a server-side tool enters the model's context
+**without passing through `ToolSession`**. It would never be fenced, the turn
+would never be marked as having touched untrusted content, and D-022 could not
+fire — so an injected instruction inside a fetched page could reach a second
+retrieval and carry data out with it.
+
+The whole injection story here depends on untrusted content entering through one
+door we control. A worse tool inside the boundary beats a better one outside it.
+
+**Against.** We now maintain HTML extraction, SSRF checks, timeouts and size
+limits that Anthropic maintains better, and our search tool does not exist at
+all without a third-party provider. If the server-side tools ever expose a hook
+that lets a caller intercept retrieved content before it reaches the context,
+this decision should be revisited immediately — the trade is only worth it
+because no such hook exists.
 
 ---
 

@@ -29,6 +29,14 @@ export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
+/**
+ * A provider message carries either a string or raw content blocks (the latter
+ * only when replaying a tool exchange). Assembly measures both the same way.
+ */
+function sizeOf(content: string | unknown[]): number {
+  return estimateTokens(typeof content === 'string' ? content : JSON.stringify(content));
+}
+
 export interface AssembledContext {
   system: string;
   messages: ProviderMessage[];
@@ -94,13 +102,13 @@ export function assembleContext(params: AssembleParams): AssembledContext {
   if (messages.length < all.length) dropped.push('older_history');
 
   const budget = CONTEXT.tokenBudget - estimateTokens(system);
-  let used = messages.reduce((n, m) => n + estimateTokens(m.content), 0);
+  let used = messages.reduce((n, m) => n + sizeOf(m.content), 0);
 
   // Drop from the front — the oldest turns — while keeping at least the last
   // exchange, so the agent always has the message it is replying to.
   while (used > budget && messages.length > 2) {
     const removed = messages.shift()!;
-    used -= estimateTokens(removed.content);
+    used -= sizeOf(removed.content);
     if (!dropped.includes('older_history')) dropped.push('older_history');
   }
 
