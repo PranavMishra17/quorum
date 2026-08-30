@@ -77,6 +77,24 @@ const RULES = [
   },
 ];
 
+/**
+ * Rules of the opposite shape: a file at this path MUST contain this pattern.
+ *
+ * The forbidden-pattern rules above catch something being added. This catches
+ * something being *removed* — which is how a guard usually disappears: not by
+ * anyone deciding to remove it, but by a refactor that loses it.
+ */
+const REQUIRED = [
+  {
+    id: 'dev-login-gate',
+    file: 'app/auth/dev/route.ts',
+    pattern: /devLoginEnabled\(\)/,
+    why:
+      'The dev-login route hands out sessions. It must call devLoginEnabled(), ' +
+      'which requires NODE_ENV !== production AND an explicit ALLOW_DEV_LOGIN.',
+  },
+];
+
 const violations = [];
 
 for (const dir of SCAN_DIRS) {
@@ -108,6 +126,24 @@ for (const dir of SCAN_DIRS) {
         }
       });
     }
+  }
+}
+
+for (const rule of REQUIRED) {
+  const full = join(ROOT, rule.file);
+  let source;
+  try {
+    source = readFileSync(full, 'utf8');
+  } catch {
+    continue; // the file does not exist yet — nothing to guard
+  }
+  if (!rule.pattern.test(source)) {
+    violations.push({
+      rule,
+      file: rule.file,
+      line: 1,
+      text: `MISSING required guard: ${rule.pattern}`,
+    });
   }
 }
 

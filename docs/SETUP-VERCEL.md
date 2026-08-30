@@ -54,6 +54,10 @@ Variables**), add each of these to **Production, Preview, and Development**:
 | `MEMORY_WRITE_ENABLED` | `true` |
 | `TOOLS_ENABLED` | `true` |
 
+**Do not add `ALLOW_DEV_LOGIN` to Vercel.** It opens a route that hands out
+sessions for the seeded accounts. `NODE_ENV` is `production` on Vercel so the
+route stays closed regardless, but the variable has no business being there.
+
 Two things worth knowing:
 
 - **`NEXT_PUBLIC_*` variables are inlined at build time**, not read at runtime.

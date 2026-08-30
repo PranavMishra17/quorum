@@ -1,26 +1,59 @@
 @import "tailwindcss";
 
+/*
+ * Dark-first. The product is a workspace people sit in for hours, and the agent
+ * needs a monochrome treatment that reads as clearly "not a person" — which is
+ * easier to hold against a dark ground than a light one.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0c0e13;
+  --surface: #14171f;
+  --surface-raised: #1b1f2a;
+  --border: #262b38;
+  --foreground: #e8eaf0;
+  --muted: #8b93a7;
+  --accent: #7c8cf8;
+  --accent-soft: #7c8cf822;
+  --agent: #9aa3b8;
+  --danger: #e06c75;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --background: #f7f8fa;
+    --surface: #ffffff;
+    --surface-raised: #f0f2f6;
+    --border: #dfe3ea;
+    --foreground: #171a21;
+    --muted: #5f6879;
+    --accent: #4d5fd6;
+    --accent-soft: #4d5fd614;
+    --agent: #5f6879;
+    --danger: #c0392b;
+  }
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-border: var(--border);
   --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-agent: var(--agent);
+  --color-danger: var(--danger);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Wide content scrolls inside its own container; the page body never does. */
+.scroll-x {
+  overflow-x: auto;
 }
