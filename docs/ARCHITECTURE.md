@@ -4,8 +4,10 @@ High-level design and the file-by-file fan-out. Written before implementation so
 that the shape is argued about once, in one place, rather than emerging by
 accident.
 
-Status: **design**. Nothing below is implemented yet. Paths marked `(t1)`,
-`(t2)`, `(t3)` map to the build tiers in [BUILD-PLAN.md](BUILD-PLAN.md).
+Status: **Phase 1 built, Phase 2 starting.** Live progress per item is in
+[PLAN.md](../PLAN.md); this document describes the shape, not the state. Where
+implementation diverged from what was designed here, the divergence is recorded
+inline rather than quietly conformed to.
 
 ---
 
@@ -189,16 +191,24 @@ The fix is one `SECURITY DEFINER` Postgres function, created in migration `0004`
 and called once via `.rpc()` from `lib/db/scoped-agent.ts`:
 
 ```
-send_message_and_start_turn(chat_id, sender_id, content, client_message_id)
-  → REPEATABLE READ
+send_message_and_start_turn(chat_id, content, client_message_id)
+  → SECURITY DEFINER, authorises BOTH axes itself, fails closed
   → INSERT ... ON CONFLICT (chat_id, client_message_id) DO NOTHING
-  → returns the resolved turn_id, new or existing
+  → returns the resolved turn_id, new or existing, plus is_duplicate
 ```
 
 This is the *only* place a transaction spans more than one statement, and it is
 deliberately short and database-only. It does **not** contradict D-009: the whole
 turn is not wrapped, because that would hold a connection open across the model
-call. Cost of the RPC: its callers need a `40001` serialization-failure retry.
+call.
+
+**It runs at READ COMMITTED, not REPEATABLE READ (D-026).** The research
+recommended raising the isolation level, but that recommendation was about a
+general multi-table write path. This function does one idempotent insert;
+`ON CONFLICT` resolves its only race at the default level, and raising it would
+add `40001` serialization failures and a retry loop to every send to buy
+nothing. Isolation earns its cost where a function reads several tables and
+needs one consistent snapshot across them — this one does not.
 
 ### What is deliberately not in the schema
 
@@ -215,8 +225,14 @@ call. Cost of the RPC: its callers need a `40001` serialization-failure retry.
 
 Every step writes to `agent_events`. Extraction runs *after* the response is
 delivered — it keeps the user-visible turn fast and off the serverless timeout
-cliff. How "after" is implemented (Vercel `waitUntil` vs a real queue) is open;
-see research track R9.
+cliff. R9 closed the "how": `after()` from `next/server`, no queue.
+
+**Where the implementation diverges from this diagram.** There is no
+`api/agent/turn/route.ts`. The turn runs inside `after()` from the message route
+instead, so a send is acknowledged the moment it is persisted and the reply
+arrives over Realtime. A separate turn endpoint would add a second HTTP
+round-trip and a second authorisation check for no gain — the caller is our own
+server, already holding a verified actor. Recorded as D-028.
 
 **Failure is visible, not swallowed.** A model error or tool timeout writes an
 event and the chat stays usable. A broken agent must never take the chat down.
@@ -241,7 +257,7 @@ event and the chat stays usable. A broken agent must never take the chat down.
 | `browser.ts` | t1 | Publishable-key client for client components | Never sees a secret. RLS is the guard. |
 | `server.ts` | t1 | Session-bound client for route handlers and RSC | Acts *as the user*. RLS applies. |
 | `scoped-agent.ts` | t2 | `ScopedAgentContext` — the agent's entire world | The only file permitted to read `SUPABASE_SECRET_KEY`. Fixes turn identity (chat, actor, `turn_id`) at construction. **Does not cache membership or clearance** — those are re-read in SQL on every privileged call, because holding them across the model call is the TOCTOU gap (D-009). |
-| `types.ts` | t1 | Generated Supabase types | `pnpm supabase gen types` output. Regenerate, never hand-edit. |
+| `types.ts` | t1 | Row types | **Currently hand-authored** from the migrations, because generation needs a provisioned project. Replaced by `pnpm supabase gen types` output at that point, after which it is generated and never hand-edited. |
 
 ### `lib/memory/`
 
@@ -301,9 +317,10 @@ inherits authorisation from `ctx` **only under this invariant**.
 
 | File | Tier | Responsibility |
 |---|---|---|
-| `provider.ts` | t1 | Interface: `complete()`, `stream()`, `structured()`. Purpose-addressed, not model-addressed — callers pass a `CallPurpose`, never a model id. |
-| `anthropic.ts` | t1 | The implementation. Maps tier config → request shape (effort, thinking, streaming), records `llm_calls`, normalises errors. |
-| `errors.ts` | t1 | Typed failures: rate-limited, refused, timed out, malformed. Callers branch on type, never on message strings. |
+| `provider.ts` | t1 | Interface: `complete()` and `structured()` today; `stream()` is Phase 2. Purpose-addressed, not model-addressed — callers pass a `CallPurpose`, never a model id. |
+| `anthropic.ts` | t1 | The implementation. Maps tier config → request shape (effort, thinking) and normalises errors. It does **not** record `llm_calls` — that is `instrumented.ts`, a wrapper, so swapping providers does not disturb accounting and vice versa. |
+| `errors.ts` | t1 | Typed failures, each carrying `retryable`. Callers branch on `kind`, never on message strings. |
+| `instrumented.ts` | t1 | Wraps a provider to write the `llm_calls` row **before** the network call, then update it. |
 
 ### `lib/events/`
 
@@ -358,14 +375,22 @@ footgun, and part of research track R1.
 Organised by the claim under test, not by source file.
 
 ```
-authorization/  membership.test.ts  clearance.test.ts  admin.test.ts  rls.test.ts
-memory/         isolation.test.ts   lifecycle.test.ts  conflict.test.ts  retrieval.test.ts
-agent/          gate.test.ts        orchestrator.test.ts
+config.test.ts                      tier/model invariants, no DB or key needed
+authorization/  rls-foundation.test.ts  membership.test.ts  clearance.test.ts
+                messages.test.ts
+memory/         isolation.test.ts       lifecycle.test.ts
+agent/          gate.test.ts            judge.test.ts       llm-errors.test.ts
+                scoped-context-invariant.test.ts  output-sanitisation.test.ts
+auth/           dev-login-gate.test.ts
 tools/          scoping.test.ts
 ```
 
-`rls.test.ts` runs against a real Postgres as an *unprivileged* role. Testing RLS
-through a service-role client tests nothing.
+Everything under `authorization/`, `memory/` and `tools/` runs against a real
+Postgres 18.4 as an **unprivileged role** — testing RLS through a service-role
+client tests nothing. Docker is not available on the development machine, so the
+harness runs genuine Postgres binaries via `embedded-postgres` rather than a
+container; an in-JS emulator was rejected because it does not implement RLS.
+Details in [`tests/README.md`](../tests/README.md).
 
 ---
 

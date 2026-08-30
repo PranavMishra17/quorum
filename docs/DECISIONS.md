@@ -33,6 +33,7 @@ Format per entry: **Context → Decision → Why → Status → Revisit if**.
 | D-025 | Space view renders SVG, not canvas | settled (new, from R15) |
 | D-026 | Idempotency RPC runs at READ COMMITTED, against R14's advice | settled |
 | D-027 | Discovery gated on clearance, not on membership | settled |
+| D-028 | No separate agent-turn endpoint; the turn runs in `after()` | settled |
 | D-012 | Removed members lose access to history | settled (assumption) |
 | D-013 | Memory extraction is deferred, never inline | settled |
 | D-014 | Conflict resolution is deterministic, never delegated to the model | settled |
@@ -596,6 +597,33 @@ becomes obvious when you try to assert it.
 can no longer see a chat they are still formally in, which is a confusing state
 to render in a UI. The alternative — showing it but refusing entry — discloses
 its existence, so the confusing state is the safer one.
+
+---
+
+## D-028 — No separate agent-turn endpoint
+
+**Context.** `docs/ARCHITECTURE.md` listed `api/agent/turn/route.ts` as the
+agent pipeline entry point. It does not exist.
+
+**Decision.** The turn runs inside `after()` from the message route. There is no
+second endpoint.
+
+**Why.** A separate endpoint would mean a second HTTP round-trip and a second
+authorisation check, for a caller that is our own server already holding a
+verified actor and a `turn_id` from the RPC. It would also need its own
+authentication story — an internal endpoint that starts agent turns is an
+attractive thing to be able to call directly.
+
+Running in `after()` keeps the send fast (the response returns as soon as the
+message is persisted) and the reply arrives over Realtime, which is the same
+path a reply from another human takes.
+
+**Against.** It couples the turn's lifetime to the request's invocation, so a
+turn cannot outlive `maxDuration`, and there is no way to re-trigger a turn
+without re-sending a message. If turns ever need to be replayed or run longer
+than an invocation, this becomes a queue and an endpoint — which is exactly the
+"when would you introduce a queue" question R9 answered, and the trigger is
+recorded there.
 
 ---
 

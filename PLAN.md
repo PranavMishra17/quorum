@@ -9,18 +9,16 @@ commit as the work it describes, so it is never stale. Detail lives in
 ## At a glance
 
 ```
-PHASE 1  MVP · submittable                    ████████████████  ~95%   ← WE ARE HERE
-PHASE 2  Memory + agent depth + polish        ██░░░░░░░░░░░░░░  ~15%
+PHASE 1  MVP · submittable                    ███████████████░  ~90%
+PHASE 2  Memory + agent depth + polish        ██░░░░░░░░░░░░░░  ~15%   ← WE ARE HERE
 PHASE 3  Tools, capability, polish, submit    ░░░░░░░░░░░░░░░░    0%
 ```
 
-**Right now:** Phase 1 is code-complete. 9 migrations, auth, chat UI, the LLM
-seam, the response gate and the turn pipeline all exist; 241 assertions pass and
-CI is green. What remains is running it against a real Supabase project, which
-needs provisioning.
+**Right now:** Phase 2. A sanity check against `docs/ARCHITECTURE.md` found one
+genuine Phase 1 miss — chat creation — plus four items that were in the fan-out
+but never in this plan. All are listed below rather than quietly absorbed.
 
-**Immediately next:** provision Supabase + Vercel, `pnpm seed:dev`, then walk
-the demo. After that, Phase 2 — memory retrieval and the internal view.
+**Immediately next:** the carried-over Phase 1 items, then memory retrieval.
 
 > Phase 2 shows progress already because the memory *schema* and its isolation
 > tests landed with the migrations. That was deliberate: the schema is one
@@ -102,6 +100,17 @@ Each row's **Proof** column names what makes it done. "It compiles" is not proof
 | ✅ | Gate judge, discrete verdict (D-020) | 18 assertions; every failure path resolves to silence |
 | ✅ | `lib/agent/orchestrator.ts` — the turn pipeline | rate limit above the gate; a turn failure never kills the chat |
 
+### 1.6 Carried over — found by the ARCHITECTURE sanity check
+
+Listed here rather than folded silently into Phase 2, because "Phase 1 complete"
+was claimed and one of these makes that not quite true.
+
+| ✔ | Item | Why it matters |
+|---|---|---|
+| ⬜ | `app/api/chats/route.ts` — create and list | **Marked t1 in the fan-out and missed.** Without it, chats exist only via `pnpm seed:dev`, and the brief explicitly says users create DMs and group chats. |
+| ⬜ | New-chat UI: DM, group, and the `agent` chat type | Nothing currently creates an `agent`-type chat, so gate rule 2 is unreachable in the running app |
+| ⬜ | `lib/agent/prompts/` — prompts as files | The charter says "system prompts as files, not string literals in logic". They are currently literals in `judge.ts` and `context.ts`. |
+
 **Phase 1 exit gate:** deployed; two real users converse; the agent speaks
 appropriately; a non-member gets nothing. Submittable.
 
@@ -131,6 +140,9 @@ appropriately; a non-member gets nothing. Submittable.
 | ⬜ | Realtime channel force-close on removal (**T11**) | removed member stops receiving live |
 | ⬜ | **Agent internal view** — the single best demo artifact | shows retrieved *and filtered-out* counts |
 | ⬜ | Token + cost accounting per chat and globally | reads from `llm_calls` |
+| ⬜ | `api/chats/[chatId]/members/route.ts` | invite, request, approve, remove, promote |
+| ⬜ | `api/chats/[chatId]/events/route.ts` | the internal-view feed |
+| ⬜ | `provider.stream()` + streaming reply UI | a long reply currently lands all at once |
 
 **Phase 2 exit gate:** the thesis is provable **and visible on screen**. A memory
 isolation rule you cannot see working is indistinguishable from one that does
