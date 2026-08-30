@@ -1,36 +1,275 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Quorum
 
-## Getting Started
+A multi-user chat workspace where a single AI agent is present in every
+conversation, decides for itself whether it should speak, and learns about the
+people it talks to — **without ever carrying what it learned across an
+authorisation boundary.**
 
-First, run the development server:
+Built as a take-home for Moritz Legal. TypeScript end to end: Next.js on Vercel,
+Postgres on Supabase.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+> **Status: pre-build.** The repository is scaffolded, configured, and planned;
+> application code has not been written yet. Sections marked *(planned)* describe
+> intended behaviour, not shipped behaviour. This notice comes out when the
+> build does. See [`docs/BUILD-PLAN.md`](docs/BUILD-PLAN.md) for what lands when.
+
+---
+
+## The problem the assignment hides
+
+The brief says:
+
+> *The agent learns useful information about users and can use it in future
+> conversations.*
+
+Implemented literally, that is a privacy leak.
+
+Alice tells the agent something in a DM. The agent stores it against Alice.
+Alice later speaks in a twelve-person group. The agent retrieves what it knows
+about Alice — including the thing she said in confidence to a two-person
+conversation — and uses it in front of eleven people who were never party to it.
+
+Nothing in the requirement warns you about this. A naive `user_id → memories[]`
+schema produces it by default, and the resulting demo looks like it works.
+
+**Noticing this is most of the exercise.** The rest of this README is largely
+about the rule that closes it.
+
+## The surfacing rule
+
+> A memory item learned in chat **C1** may surface in chat **C2** only if:
+>
+> 1. **Audience containment** — every active member of C2 was in the audience
+>    snapshot taken when the item was learned. The audience may narrow, never
+>    widen.
+> 2. **Clearance floor** — C2's clearance level is **>=** the level recorded on
+>    the item.
+>
+> Both conditions. Always. Evaluated in SQL, before ranking.
+
+**Why condition 2 is not redundant.** The same set of people can share both a
+level-3 *Internal Exec* group and a level-0 general group. Audience containment
+alone is satisfied in both directions — so a fact learned in the exec channel
+would be free to surface in the general channel. Clearance is the axis that
+stops it. Membership answers *who*; clearance answers *in what capacity*.
+
+Properties worth stating plainly:
+
+- **It fails closed.** Ambiguity resolves to not-surfacing.
+- **It is cheap.** A set-containment check and an integer comparison.
+- **It is testable.** The isolation tests below are the ones that prove the thesis.
+- **The model never receives out-of-scope memory at all.** It cannot leak what
+  it was never given. This is structural prevention, not a prompt asking the
+  model to be discreet.
+
+### Retrieval order, and why the order is the design
+
+In a twenty-person group, loading every member's memory is wrong on cost,
+latency, and precision. Retrieval runs:
+
+```
+1. FILTER   audience containment + clearance floor  — in SQL, before anything else
+2. RANK     semantic similarity, recency, speaker presence in recent turns
+3. CAP      a global item budget AND a per-subject cap
+4. LOG      retrieved count and filtered-out count -> agent_events
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The critical property is that step 1 precedes step 2. Retrieving the top 20 by
+relevance and then discarding the unauthorised ones is a different program with
+the same output most of the time — and a leak the rest of the time.
+Authorisation is not a relevance-ranking problem.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+The per-subject cap in step 3 exists so one heavily-discussed person cannot
+crowd out the other nineteen.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+---
 
-## Learn More
+## Authorisation: two independent axes
 
-To learn more about Next.js, take a look at the following resources:
+Both must pass, on every read.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Axis | Question | Mechanism |
+|---|---|---|
+| **Membership** | Is this user in this chat? | `chat_members.status = 'member'` |
+| **Clearance** | Is this user badged for this kind of chat? | user's grants vs `chats.required_clearance_id` |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+An *External Audit* group is unreachable by a user without that clearance
+**regardless of any membership row**. The axes are independent by construction,
+which is exactly what makes the clearance floor meaningful in the memory rule.
 
-## Deploy on Vercel
+### Enforced at the data layer
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Row-level security is on for **every** table, written in the same migration that
+creates the table. The publishable Supabase key ships in the browser bundle; it
+is only safe because RLS is what actually stops the query. Client-side checks
+exist for UX and are never the sole guard.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Memory tables are stricter still: **no client access at all.** Policies deny the
+authenticated role outright. Memory is reachable only through the server-side
+scoped path.
+
+### The agent is the dangerous actor *(planned)*
+
+The agent runs server-side and needs to read across chats to do its job. That
+makes it the single most likely path to a leak, so it never holds an unscoped
+service-role client in the request path.
+
+`ScopedAgentContext` is constructed once per turn from a chat id. It resolves and
+holds the chat's active member set, its clearance level, and the requesting
+user. Every agent read — memory, files, message history — goes through it, and
+it applies the filters in SQL before returning anything.
+
+**A class is not a security boundary.** The honest version of this claim is four
+layers, and only the middle two are enforcement:
+
+1. *Convention* — one documented read path (`CLAUDE.md` non-negotiable #2).
+2. **Application** — the context is the only place the service-role key is read.
+3. **Database** — RLS means a bug in layer 2 still cannot cross a tenant.
+4. *Tests* — a context built for chat A returns nothing belonging to chat B.
+
+Layers 1 and 4 catch mistakes. Layer 3 is what survives them. If asked *"why RLS
+when you already have application authorisation?"*: defence in depth —
+application logic controls behaviour *intentionally*; RLS ensures an
+unintentional bug does not become cross-tenant data access.
+
+---
+
+## When the agent speaks *(planned)*
+
+The agent is present everywhere and must decide whether to respond. Hybrid:
+a deterministic chain first, a model judge only for genuine ambiguity.
+
+Evaluated in order, first match wins:
+
+| # | Condition | Verdict |
+|---|---|---|
+| 1 | Sender is the agent itself | **silent** — loop guard, non-negotiable |
+| 2 | Chat type is `agent` | **respond** — this is a direct conversation |
+| 3 | Message mentions the agent | **respond** |
+| 4 | Message replies to an agent message | **respond** |
+| 5 | Two-human DM, agent not addressed | **silent** — present, but not a participant |
+| 6 | Agent spoke within the cooldown, nothing new directed at it | **silent** |
+| — | anything else | model judge |
+
+The judge returns a verdict plus a one-line reason, and is **biased toward
+silence**: an agent that stays quiet slightly too often is far better than one
+that interjects constantly, and the failure modes are not symmetric. Judge
+errors and timeouts also resolve to silence.
+
+Every evaluation writes a `gate_evaluated` event carrying the verdict, which
+rule fired, and the reason. Rate limiting sits above all of it.
+
+## The agent internal view *(planned)*
+
+Each chat exposes an append-only log of everything the agent did: gate decisions
+and why, memory reads *including how many items the filter removed*, memory
+writes, conflicts and how they resolved, tool calls and results, context dropped
+for budget reasons, and token spend per call.
+
+This is deliberately the most prominent feature after the chat itself. A memory
+isolation rule you cannot see working is indistinguishable from one that does
+not work.
+
+---
+
+## Getting started
+
+Requires Node 22+, pnpm 9+, a Supabase project, and an Anthropic API key.
+
+```bash
+pnpm install
+cp .env.example .env.local   # then fill it in
+pnpm dev
+```
+
+Filling in `.env.local`, in exact steps:
+
+- **Supabase** — [`docs/SETUP-SUPABASE.md`](docs/SETUP-SUPABASE.md)
+- **Vercel** — [`docs/SETUP-VERCEL.md`](docs/SETUP-VERCEL.md)
+
+Model selection, thinking depth, cost tiers, gate thresholds, memory caps and
+rate limits all live in [`config/`](config/) — not scattered through the code.
+
+---
+
+## Tests that matter *(planned)*
+
+The brief asks for the tests *considered important*, not for coverage. These are
+chosen so that each one defends a claim this README makes.
+
+**Authorisation**
+- A non-member cannot read a chat, its messages, its events, or its files.
+- A member without the required clearance cannot read a clearance-gated chat.
+- A removed member loses access from the moment of removal.
+- A `requested` membership row grants no read access.
+- A non-admin cannot add, remove, or promote members.
+
+**Memory isolation — the tests that prove the thesis**
+- An item learned in a DM does not surface in a group containing anyone outside
+  that DM.
+- An item learned in a level-3 chat does not surface in a level-0 chat with an
+  *identical member set*.
+- An item does surface in a chat whose members are a strict subset of the
+  original audience.
+- A user who joins a group *after* an item was learned neither causes that item
+  to be excluded elsewhere, nor gains access to it.
+- A `ScopedAgentContext` built for chat A returns nothing belonging to chat B.
+
+**Agent behaviour**
+- The agent never responds to its own message.
+- The agent stays silent in a group when not addressed.
+- The agent responds when mentioned.
+- The cooldown suppresses a rapid second response.
+
+**Memory lifecycle**
+- A directly stated fact supersedes a conflicting inferred fact.
+- A superseded item is not retrieved.
+- A candidate item below the confidence threshold is not retrieved.
+
+**Tools**
+- A file uploaded in chat A is not retrievable from chat B.
+
+---
+
+## Assumptions
+
+Recorded because each one is a defensible reading of an under-specified
+requirement, not because each one is obviously correct.
+
+1. **An `agent` chat type exists with a single human member.** This extends the
+   stated minimum of two users per chat. It exists so the agent can be addressed
+   directly with different gate behaviour.
+2. **Removed members lose access to history from the moment of removal.** The
+   Slack-style alternative — retaining previously visible history — is equally
+   defensible. The stricter reading was chosen deliberately.
+3. **Memory audience is a snapshot at learn time, not current membership.**
+   Someone who joins later was not present when the thing was said.
+4. **Memory visibility never widens automatically.** Broadening requires an
+   explicit act by the subject.
+5. **Clearances are an integer level plus a named key** — enough to demonstrate
+   the authorisation axis without modelling a real entitlement system.
+6. **Google is the only auth provider.** Authentication was explicitly permitted
+   to be simplified; authorisation is where the effort went.
+7. **The gate biases toward silence when uncertain.**
+
+## Tradeoffs and what comes next
+
+To be written against the finished build, from the running log in
+[`docs/DECISIONS.md`](docs/DECISIONS.md).
+
+Known deliberate cuts so far:
+
+- **No knowledge graph.** `memory_nodes` / `memory_edges` were designed and then
+  cut. The core requirement is *scoped retrieval*, not graph traversal; graph
+  semantics would be introduced once a concrete product query justified the
+  complexity. Provisional pending research track R4.
+- **Gmail integration** is the first thing dropped if time runs short.
+- **The force-directed space view is scheduled last on purpose.** It is the most
+  visually impressive piece and the least graded; a conventional list view ships
+  first and remains the fallback.
+
+## On AI tooling
+
+How AI tools were used, which parts were generated versus hand-written, and how
+the output was checked: [`docs/AI-USAGE.md`](docs/AI-USAGE.md), kept as a running
+log rather than reconstructed at the end.
