@@ -8,12 +8,16 @@ authorisation boundary.**
 Built as a take-home for Moritz Legal. TypeScript end to end: Next.js on Vercel,
 Postgres on Supabase.
 
-> **Status: built, not yet deployed.** Auth, chats, the response gate, the turn
+> **Live at <https://quorum-rho.vercel.app>.** Verify the claims yourself with
+> [`docs/VERIFY.md`](docs/VERIFY.md) — every check states what to do, what to
+> expect, and what failure looks like.
+>
+> **Status: built and deployed.** Auth, chats, the response gate, the turn
 > pipeline, memory retrieval and extraction, and the agent internal view are all
 > implemented, with ~300 assertions passing against a real PostgreSQL. What has
-> not happened is a run against a provisioned Supabase project — so anything
-> requiring live Google OAuth is written and type-checked but not yet *observed*
-> working, and is not claimed as such. Live progress: [`PLAN.md`](PLAN.md).
+> The unauthenticated half of the authorisation story is verified against
+> production; authenticated flows need a human with a Google account and are
+> marked as unverified in [`PLAN.md`](PLAN.md) until someone runs them.
 
 ---
 

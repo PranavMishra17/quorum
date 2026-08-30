@@ -4,6 +4,10 @@
 commit as the work it describes, so it is never stale. Detail lives in
 [`docs/BUILD-PLAN.md`](docs/BUILD-PLAN.md); this is the map.
 
+**Live:** <https://quorum-rho.vercel.app> · Repo:
+<https://github.com/PranavMishra17/quorum> ·
+**Verify it yourself:** [`docs/VERIFY.md`](docs/VERIFY.md)
+
 ---
 
 ## At a glance
@@ -11,12 +15,28 @@ commit as the work it describes, so it is never stale. Detail lives in
 ```
 PHASE 1  MVP · submittable                    ███████████████░  ~90%
 PHASE 2  Memory + agent depth + polish        ████████████████  100%
-PHASE 3  Tools, capability, polish, submit    ███████░░░░░░░░░  ~45%   ← WE ARE HERE
+PHASE 3  Tools, capability, polish, submit    █████░░░░░░░░░░░  ~30%   ← WE ARE HERE
 ```
 
 **Right now:** Phase 2. A sanity check against `docs/ARCHITECTURE.md` found one
 genuine Phase 1 miss — chat creation — plus four items that were in the fan-out
 but never in this plan. All are listed below rather than quietly absorbed.
+
+**Deployed and partly verified against production.** Supabase is provisioned,
+migrations are applied, Google auth is configured, and Vercel is live. The
+unauthenticated half of the authorisation story is now **observed, not claimed**:
+
+| Checked against production | Result |
+|---|---|
+| `/chats` while signed out | 307 → `/?next=%2Fchats` |
+| `/auth/dev?user=alice` | **404** — the three-way dev-login gate holds |
+| `/auth/callback` headers | `private, no-store, max-age=0, must-revalidate` (**T8**) |
+| `POST /api/chats`, `/api/clearances` unauthenticated | 401 |
+| Landing page | renders the app, not the setup notice |
+
+Authenticated flows need a browser and a Google account, so they are yours to
+run — [`docs/VERIFY.md`](docs/VERIFY.md) is the script, with expected results
+**and what failure looks like** for each claim.
 
 **Phase 2 sanity check** found one real gap and two usability blockers, all now
 closed:
@@ -76,7 +96,7 @@ Each row's **Proof** column names what makes it done. "It compiles" is not proof
 | ✅ | `lib/db/browser.ts` — publishable key, RLS enforced | builds; RLS proven at the data layer |
 | ✅ | `lib/db/server.ts` — session-bound, `getClaims()` not `getSession()` (**T6**) | uses getClaims; acts as the user |
 | ✅ | `lib/db/scoped-agent.ts` — the **only** service-role site | 18 assertions; **negative control passed** |
-| 🟡 | `lib/db/types.ts` — hand-authored placeholder | replaced by `supabase gen types` once provisioned |
+| 🟡 | `lib/db/types.ts` — hand-authored placeholder | now that the project exists, run `pnpm supabase gen types typescript --linked > lib/db/types.ts` and drop the call-site casts |
 | ✅ | `proxy.ts` — UX redirect only, **not** a guard (**T7**) | Next recognises it; no authz decision in it |
 | ✅ | `app/auth/callback/route.ts` — PKCE, `no-store` on every path (**T8**) | open-redirect guarded |
 
@@ -84,7 +104,7 @@ Each row's **Proof** column names what makes it done. "It compiles" is not proof
 
 | ✔ | Item | Proof |
 |---|---|---|
-| 🟡 | Google OAuth end to end | code done; needs a provisioned project to verify |
+| 🟡 | Google OAuth end to end | project provisioned and configured; sign-in itself still needs a human with a Google account to confirm |
 | ✅ | Seeded dev login, hard-gated to non-production | 10 assertions + a boundary rule, both negative-controlled |
 | ✅ | Profile bootstrap on first sign-in | inserts via the session client, so RLS still enforces self-only |
 
@@ -169,10 +189,15 @@ not work.
 | ✅ | 1 | File upload + read tool | ctx.readFile takes a RESOURCE id; scope still comes from construction |
 | ✅ | 2 | Least-privilege turn scoping enforced (D-022) | 18 assertions, negative-controlled |
 | 🟡 | 3 | web_fetch done (38 SSRF assertions); web_search is a seam awaiting a provider | tight on time |
-| ⬜ | 4 | Cost/token dashboard | tight on time |
-| ⬜ | 5 | Space view — force-directed, **SVG** (D-025) | first to go |
-| ⬜ | 6 | Floating chat panels | first to go |
-| ⬜ | 7 | Research tool, bounded multi-step | first to go |
+| ⬜ | 4 | **PDF + DOCX extraction** — contracts are PDFs, so for a legal product this is the most obviously-missing capability | never; it is the point |
+| ⬜ | 5 | **Structured extract-to-schema** — parties, dates, obligations. Cheap on the existing `structured()` method | tight on time |
+| ⬜ | 6 | **Gmail connector, read-only** — [`docs/EMAIL-SETUP.md`](docs/EMAIL-SETUP.md) | tight on time |
+| ⬜ | 7 | **Calendar (read-only)** — reuses the Gmail OAuth client | first to go |
+| ⬜ | 8 | Research tool (bounded multi-step) | first to go |
+| ✅ | — | Cost/token dashboard | shipped in Phase 2 |
+| ⬜ | 9 | Space view — force-directed, **SVG** (D-025) | first to go |
+| ⬜ | 10 | Floating chat panels | first to go |
+
 | ❌ | — | Gmail | **already cut** — OAuth scope for no marginal signal |
 
 ### Submission
@@ -181,6 +206,7 @@ not work.
 |---|---|
 | ⬜ | README finished from the running `docs/DECISIONS.md` |
 | ⬜ | `docs/AI-USAGE.md` finalised — generated vs hand-written vs **how checked** |
+| ⬜ | Walk [`docs/VERIFY.md`](docs/VERIFY.md) end to end on the deployed URL |
 | ⬜ | Verify against a **clean browser session**, not a logged-in tab |
 | ⬜ | Remove a member with the chat open in another window (**T11**) — the case most likely to contradict the README live |
 | ⬜ | Repo public, deploy live, both verified from a cold machine |
