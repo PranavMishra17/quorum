@@ -178,6 +178,7 @@ export async function truncateAll(admin: Client): Promise<void> {
     truncate public.memory_audience, public.memory_items,
              public.agent_events, public.llm_calls, public.messages,
              public.chat_members, public.chats, public.user_clearances,
+             public.connector_tokens,
              public.profiles restart identity cascade;
     delete from auth.users;
   `);

@@ -117,6 +117,30 @@ const serverSchema = z.object({
    */
   EMBEDDING_API_KEY: optionalSecret,
 
+  /**
+   * Google OAuth credentials for the READ-ONLY Gmail and Calendar connectors.
+   *
+   * Separate from Supabase's sign-in credentials on purpose. Supabase holds the
+   * ones used for authentication and does not hand back a refresh token
+   * carrying extra scopes, so reading mail is a second, explicit authorisation
+   * the user grants knowingly — rather than something that arrives silently
+   * attached to "sign in with Google".
+   *
+   * All three optional together. Absent = the connectors are not registered.
+   */
+  GOOGLE_OAUTH_CLIENT_ID: optionalSecret,
+  GOOGLE_OAUTH_CLIENT_SECRET: optionalSecret,
+  GOOGLE_OAUTH_REDIRECT_URI: optionalSecret,
+
+  /**
+   * 32 random bytes, base64. Encrypts connector refresh tokens at rest.
+   *
+   * Absent = connectors unavailable. It deliberately does NOT fall back to
+   * storing tokens in plaintext — see lib/connectors/crypto.ts for why that is
+   * the fallback nobody notices.
+   */
+  CONNECTOR_ENCRYPTION_KEY: optionalSecret,
+
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 });
 

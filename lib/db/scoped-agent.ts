@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { clientEnv, serverEnv } from '@/config';
+import { openToken } from '@/lib/connectors/crypto';
 import type { Database, FileRow, Message } from './rows';
 
 /**
@@ -233,6 +234,61 @@ export class ScopedAgentContext {
 
     if (downloadError || !blob) return null;
     return { meta, bytes: await blob.arrayBuffer() };
+  }
+
+  /**
+   * The turn actor's Google connector refresh token, decrypted, or null.
+   *
+   * ---------------------------------------------------------------------------
+   * IT TAKES NO PARAMETER, AND THAT IS THE POINT
+   *
+   * The obvious signature is `connectorToken(userId, provider)`. Both arguments
+   * would be a leak: the first is a scope-defining id, so a crafted document
+   * could get the model to name someone else and read THEIR mailbox; the
+   * second only looks harmless because there happens to be one provider today.
+   *
+   * So the subject comes from `this.actorId` and the provider is fixed. The
+   * mailbox reachable in this turn is the mailbox of the person whose message
+   * started it. Alice connecting her mail does not let the agent read it on
+   * Bob's behalf, in a chat Alice is not in, or in a turn Alice did not start.
+   *
+   * Authorisation is re-checked first, like every other privileged read: a
+   * turn whose actor lost access mid-flight must not then read their mail into
+   * a chat they are no longer in.
+   *
+   * `connector_tokens` has RLS on and NO policy, so this is unreachable from
+   * the browser at all — see migration 0014.
+   */
+  async googleConnectorToken(): Promise<{ token: string; scopes: string[] } | null> {
+    await this.assertActorAuthorised();
+
+    // `connector_tokens` appears in the generated types only once 0014 has been
+    // pushed and `pnpm supabase gen types` re-run. Typed by hand here rather
+    // than blocking the build on a deploy step; the shape is checked below and
+    // the migration is the source of truth either way. Delete the cast after
+    // the next regeneration.
+    const { data, error } = await (this.db as SupabaseClient)
+      .from('connector_tokens')
+      .select('refresh_token_encrypted, scopes, revoked_at')
+      .eq('user_id', this.actorId) // ← subject, from construction
+      .eq('provider', 'google')
+      .maybeSingle();
+
+    if (error || !data) return null;
+    const row = data as { refresh_token_encrypted: string; scopes: string[]; revoked_at: string | null };
+    if (row.revoked_at) return null;
+
+    try {
+      return { token: openToken(row.refresh_token_encrypted), scopes: row.scopes ?? [] };
+    } catch {
+      // Undecryptable means tampered-with or encrypted under a rotated key.
+      // Either way it is not a credential we may use — treat it as absent
+      // rather than passing bytes of unknown provenance to Google.
+      console.error('[connector] stored google token could not be decrypted', {
+        userId: this.actorId,
+      });
+      return null;
+    }
   }
 
   // -------------------------------------------------------------------------

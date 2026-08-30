@@ -261,6 +261,44 @@ export const DOCUMENTS = {
   maxSchemaFields: 12,
 } as const;
 
+// ---------------------------------------------------------------------------
+// External connectors — read-only, per-user, and deliberately narrow
+// ---------------------------------------------------------------------------
+
+/**
+ * Bounds for the Google connectors. See `docs/EMAIL-SETUP.md` for the
+ * authorisation design and for what this deliberately does not solve.
+ *
+ * `chatTypes` is the one to read twice. A mailbox has no audience snapshot — it
+ * is one person's data with no notion of who else is in the room — so a search
+ * run in a group puts Alice's mail in front of everyone in that group. Memory
+ * has a rule for this; an inbox does not. Restricting the connectors to DMs and
+ * agent chats is the honest v1 answer, and it is enforced at registration so
+ * the model is never even offered the tool in a group.
+ */
+export const CONNECTORS = {
+  /** Where a connector tool may be offered at all. */
+  chatTypes: ['dm', 'agent'] as readonly string[],
+
+  email: {
+    /** Messages returned per search. Small: this answers questions, not exports. */
+    maxResults: 10,
+    /** Google's snippet is ~200 chars; this is the ceiling we enforce ourselves. */
+    maxSnippetChars: 300,
+    /** Ceiling on the model-authored search query, which is interpolated into a URL. */
+    maxQueryChars: 200,
+  },
+
+  calendar: {
+    maxResults: 20,
+    /**
+     * How far a single query may reach. An unbounded window is a calendar
+     * export; a bounded one answers "what does my week look like".
+     */
+    maxWindowDays: 60,
+  },
+} as const;
+
 /**
  * The research tool is USER-INVOKED and runs as its own turn type — it is not
  * part of the automatic tool loop above, which is why its budget legitimately

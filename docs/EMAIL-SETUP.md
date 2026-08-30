@@ -1,7 +1,12 @@
-# Gmail connector — setup
+# Google connector — setup
 
-A **read-only** email tool for the agent. Not built yet; this is the setup and
-the design, written before the code so the authorisation story is settled first.
+**Read-only Gmail and Calendar** for the agent. This file was written before the
+code, so the authorisation story was settled first; it is now updated to match
+what shipped, with the differences called out where they matter.
+
+**Status: built.** Migration `0014`, `lib/connectors/`,
+`app/api/connectors/google/`, the `/connectors` page, and the `email_search` and
+`calendar_list` tools. 52 assertions, of which 23 run against a real Postgres.
 
 ---
 
@@ -52,11 +57,16 @@ would mean a second consent screen for the same user.
 
 **APIs & Services → OAuth consent screen → Data access → Add or remove scopes**
 
-Add exactly one:
+Add two — Calendar came along for free, because it reuses the same OAuth
+client and the same consent screen:
 
 ```
 https://www.googleapis.com/auth/gmail.readonly
+https://www.googleapis.com/auth/calendar.readonly
 ```
+
+Calendar's scope is **sensitive**, not restricted, so it does not change the
+review picture: Gmail's `readonly` is the binding constraint either way.
 
 Google will mark it restricted and show a warning about verification. Expected —
 see above.
@@ -83,8 +93,25 @@ this is a **separate authorisation**, deliberately:
 # .env.local
 GOOGLE_OAUTH_CLIENT_ID=...apps.googleusercontent.com
 GOOGLE_OAUTH_CLIENT_SECRET=...
-GOOGLE_OAUTH_REDIRECT_URI=https://YOUR-APP.vercel.app/api/connectors/gmail/callback
+GOOGLE_OAUTH_REDIRECT_URI=https://YOUR-APP.vercel.app/api/connectors/google/callback
+
+# 32 random bytes, base64 — encrypts refresh tokens at rest.
+CONNECTOR_ENCRYPTION_KEY=...
 ```
+
+Generate the encryption key with:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+```
+
+**There is no plaintext fallback.** Without this key the connectors are not
+registered at all. A fallback to storing tokens unencrypted is the one everybody
+writes and nobody notices, because everything keeps working — the only visible
+difference is that mailbox credentials become readable in a backup.
+
+Local development uses `http://localhost:3000/api/connectors/google/callback`;
+add both URIs to the OAuth client.
 
 Create them under **APIs & Services → Credentials → Create credentials → OAuth
 client ID → Web application**, with that redirect URI listed.
@@ -92,11 +119,13 @@ client ID → Web application**, with that redirect URI listed.
 Add the same three to Vercel. `GOOGLE_OAUTH_CLIENT_SECRET` must **never** take a
 `NEXT_PUBLIC_` prefix — `pnpm check:boundaries` will fail the build if it does.
 
-## 5. Install — 1 min
+## 5. Install — nothing to install
 
-```bash
-pnpm add googleapis
-```
+`googleapis` was in `package.json` and has been **removed**. It is a generated
+client for ~400 APIs weighing tens of megabytes; this connector uses four
+endpoints, and on a serverless function that weight is real. `lib/connectors/
+google.ts` calls them with plain `fetch` — the request that goes out is the
+request you can read in the file, and the whole surface fits on one screen.
 
 ---
 
@@ -116,21 +145,41 @@ This is the same rule as D-019 (agent authority is chat-scoped) applied to an
 external resource: the agent acts with the authority of the turn, not with the
 union of everything anyone has ever connected.
 
-### A proposed migration
+### The migration, as shipped
 
 ```sql
 create table public.connector_tokens (
-  user_id       uuid primary key references auth.users(id) on delete cascade,
-  provider      text not null check (provider = 'gmail'),
-  refresh_token text not null,          -- encrypted at rest; see below
-  scopes        text[] not null,
-  connected_at  timestamptz not null default now(),
-  revoked_at    timestamptz
+  user_id                 uuid        not null references auth.users(id) on delete cascade,
+  provider                text        not null check (provider in ('google')),
+  refresh_token_encrypted text        not null,   -- AES-256-GCM, never plaintext
+  scopes                  text[]      not null default '{}',
+  connected_at            timestamptz not null default now(),
+  revoked_at              timestamptz,
+  primary key (user_id, provider)
 );
 
 alter table public.connector_tokens enable row level security;
-revoke all on public.connector_tokens from anon, authenticated;
+revoke all on table public.connector_tokens from anon, authenticated;
 ```
+
+Two changes from the proposal. The primary key is `(user_id, provider)` rather
+than `user_id`, so a second provider does not need a migration. And the column
+is named `refresh_token_encrypted`, because a column called `refresh_token`
+holding ciphertext is an invitation for the next person to put a plaintext one
+there.
+
+Three SECURITY DEFINER functions are the only way in from a browser, and **none
+of them takes a user id**:
+
+| Function | Granted to | Returns |
+|---|---|---|
+| `connect_google(ciphertext, scopes)` | `authenticated` | nothing |
+| `connector_status()` | `authenticated` | provider, scopes, dates — **never the token** |
+| `disconnect_connector(provider)` | `authenticated` | nothing |
+
+The missing `p_user_id` is the control, not an omission. With one,
+`connect_google` becomes "attach MY mailbox to YOUR account" — after which the
+agent quotes it to that person as their own mail and acts on what it says.
 
 Same construction as the memory tables: **RLS on, no permissive policy, grants
 revoked.** A refresh token is a bearer credential for someone's entire mailbox;
@@ -151,6 +200,10 @@ jobs.
   returnsUntrustedContent: true // anyone can send you an email
 }
 ```
+
+Both flags shipped as written, and both are asserted in
+`tests/connectors/registration.test.ts` — because a flag nobody checks is a
+comment.
 
 `returnsUntrustedContent: true` is the important one, and it is not a formality.
 **Email is the single most attacker-controllable input surface in any product**:
@@ -173,6 +226,14 @@ way `file_read` truncates.
 The agent should never enumerate a mailbox. "Search for X" is a bounded request;
 "read my inbox" is a bulk export with extra steps.
 
+**Stricter than proposed, in the end: headers and snippets only, never bodies.**
+`format=metadata` returns From, To, Subject, Date and Google's ~200-character
+preview. A snippet is enough to answer "has the contract come back from Beta
+GmbH?", and a full body is unbounded attacker-authored prose with room for a
+convincing set of instructions. Reading bodies is a small change to
+`searchMessages` and a much larger one to justify — it should be a decision with
+a diff, not a default.
+
 ---
 
 ## What this does not solve
@@ -185,6 +246,11 @@ The agent should never enumerate a mailbox. "Search for X" is a bounded request;
   reply has seen them. **This should be surfaced in the UI before the first
   search runs in a multi-person chat**, and it is the strongest argument for
   restricting the connector to DMs and agent-chats in v1.
+
+  **This is what shipped.** `CONNECTORS.chatTypes` is `['dm', 'agent']`, and it
+  is enforced at *registration* rather than inside the tool: in a group the
+  model is never shown the tool at all, instead of being shown it and asked to
+  decline. Asking an agent to be careful is not a control.
 - **Google's assessment.** Unpublishable to real users without it.
 - **Token compromise.** Encryption at rest reduces the blast radius of a
   database leak; it does not help if the application itself is compromised.

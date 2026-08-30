@@ -277,7 +277,7 @@ async function speak(
   }
 
   const provider = instrument(new AnthropicProvider(), ctx, messageId);
-  const session = openToolSession(ctx, messageId);
+  const session = openToolSession(ctx, chat.type, messageId);
 
   // The conversation as the model sees it, growing as tools are used.
   const messages = [...assembled.messages];

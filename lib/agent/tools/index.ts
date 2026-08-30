@@ -1,8 +1,10 @@
 import { z } from 'zod';
-import { KILL_SWITCHES } from '@/config';
+import { CONNECTORS, KILL_SWITCHES } from '@/config';
 import type { ScopedAgentContext } from '@/lib/db/scoped-agent';
 import { fileList, fileRead } from './file';
 import { documentExtract } from './document';
+import { calendarList, emailSearch } from './connectors';
+import { googleConnectorConfigured } from '@/lib/connectors/google';
 import { webFetch, searchAvailable } from './web';
 import { ToolSession } from './session';
 import type { AnyTool } from './types';
@@ -22,7 +24,7 @@ export type { Tool, ToolResult, Citation, AnyTool } from './types';
  * registered-and-failing. A model will retry a failing tool and burn the
  * per-turn budget doing it; an absent capability it simply works around.
  */
-function allTools(): AnyTool[] {
+export function allTools(chatType: string): AnyTool[] {
   const tools: AnyTool[] = [
     fileList as AnyTool,
     fileRead as AnyTool,
@@ -37,16 +39,38 @@ function allTools(): AnyTool[] {
     // is a single import rather than a change to the loop.
   }
 
+  // The Google connectors are gated TWICE, on two different kinds of reason.
+  //
+  // Configuration: absent credentials or a missing encryption key means the
+  // capability does not exist here, so it is not offered.
+  //
+  // Chat type: a mailbox has no audience snapshot. Memory has a rule for who
+  // may see what; an inbox has one owner and no notion of a room. Running a
+  // search in a group therefore puts one person's mail in front of everyone in
+  // it, and no filter downstream can undo that — so the tool is not offered
+  // outside a DM or an agent chat at all. Withholding the capability is the
+  // control; asking the model to be careful is not one.
+  if (googleConnectorConfigured() && CONNECTORS.chatTypes.includes(chatType)) {
+    tools.push(emailSearch as AnyTool, calendarList as AnyTool);
+  }
+
   return tools;
 }
 
-/** Open a tool session for one turn. Returns null when tools are switched off. */
+/**
+ * Open a tool session for one turn. Returns null when tools are switched off.
+ *
+ * `chatType` is passed in rather than read from `ctx` because the caller has
+ * already loaded the chat summary, and because it makes the registration rule
+ * a pure function of stated inputs — testable without a database.
+ */
 export function openToolSession(
   ctx: ScopedAgentContext,
+  chatType: string,
   messageId?: string,
 ): ToolSession | null {
   if (!KILL_SWITCHES.toolsEnabled) return null;
-  const registry = new Map(allTools().map((t) => [t.name, t]));
+  const registry = new Map(allTools(chatType).map((t) => [t.name, t]));
   return new ToolSession(ctx, registry, messageId);
 }
 
