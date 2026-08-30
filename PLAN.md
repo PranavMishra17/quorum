@@ -11,7 +11,7 @@ commit as the work it describes, so it is never stale. Detail lives in
 ```
 PHASE 1  MVP · submittable                    ███████████████░  ~90%
 PHASE 2  Memory + agent depth + polish        ████████████████  100%
-PHASE 3  Tools, capability, polish, submit    ░░░░░░░░░░░░░░░░    0%   ← WE ARE HERE
+PHASE 3  Tools, capability, polish, submit    ███████░░░░░░░░░  ~45%   ← WE ARE HERE
 ```
 
 **Right now:** Phase 2. A sanity check against `docs/ARCHITECTURE.md` found one
@@ -166,9 +166,9 @@ not work.
 
 | ✔ | Priority | Item | Cut if |
 |---|---|---|---|
-| ⬜ | 1 | File upload + read tool | never — cheapest tool, proves resource-level authz |
-| ⬜ | 2 | Least-privilege turn scoping enforced (D-022) | never — it is the injection claim |
-| ⬜ | 3 | Web search tool, results summarised not dumped | tight on time |
+| ✅ | 1 | File upload + read tool | ctx.readFile takes a RESOURCE id; scope still comes from construction |
+| ✅ | 2 | Least-privilege turn scoping enforced (D-022) | 18 assertions, negative-controlled |
+| 🟡 | 3 | web_fetch done (38 SSRF assertions); web_search is a seam awaiting a provider | tight on time |
 | ⬜ | 4 | Cost/token dashboard | tight on time |
 | ⬜ | 5 | Space view — force-directed, **SVG** (D-025) | first to go |
 | ⬜ | 6 | Floating chat panels | first to go |

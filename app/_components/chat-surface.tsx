@@ -166,7 +166,7 @@ export function ChatSurface({
         ))}
         <div ref={bottomRef} />
       </div>
-      <Composer onSend={send} />
+      <Composer chatId={chatId} onSend={send} />
     </div>
   );
 }
@@ -205,8 +205,15 @@ function MessageRow({ message, isMe }: { message: UiMessage; isMe: boolean }) {
   );
 }
 
-function Composer({ onSend }: { onSend: (text: string) => Promise<void> }) {
+function Composer({
+  chatId, onSend,
+}: {
+  chatId: string;
+  onSend: (text: string) => Promise<void>;
+}) {
   const [value, setValue] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -216,21 +223,60 @@ function Composer({ onSend }: { onSend: (text: string) => Promise<void> }) {
     await onSend(text);
   }
 
+  async function upload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    setUploading(true);
+    setNotice(null);
+    try {
+      const body = new FormData();
+      body.append('file', file);
+      const res = await fetch(`/api/chats/${chatId}/files`, { method: 'POST', body });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error ?? 'upload failed');
+      // The agent finds files through file_list rather than being told about
+      // them, so a message is a convenience, not the mechanism.
+      setNotice(`Attached ${json.filename}. Ask the agent about it.`);
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : 'upload failed');
+    } finally {
+      setUploading(false);
+    }
+  }
+
   return (
-    <form onSubmit={submit} className="mt-4 flex gap-2">
-      <input
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        placeholder="Message — mention @quorum to address the agent directly"
-        className="flex-1 rounded-lg border border-border bg-surface px-3 py-2.5 text-sm outline-none transition focus:border-accent"
-      />
-      <button
-        type="submit"
-        disabled={!value.trim()}
-        className="rounded-lg border border-border bg-surface-raised px-4 text-sm transition hover:border-accent disabled:opacity-40"
-      >
-        Send
-      </button>
-    </form>
+    <div className="mt-4">
+      {notice && <p className="mb-2 text-xs text-muted">{notice}</p>}
+      <form onSubmit={submit} className="flex gap-2">
+        <label
+          className="grid cursor-pointer place-items-center rounded-lg border border-border bg-surface-raised px-3 text-sm transition hover:border-accent"
+          title="Attach a text file — txt, md, csv, html, json or xml"
+        >
+          {uploading ? '…' : '+'}
+          <input
+            type="file"
+            onChange={upload}
+            disabled={uploading}
+            accept=".txt,.md,.csv,.html,.json,.xml,text/plain,text/markdown,text/csv,text/html,application/json,application/xml"
+            className="hidden"
+          />
+        </label>
+        <input
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="Message — mention @quorum to address the agent directly"
+          className="flex-1 rounded-lg border border-border bg-surface px-3 py-2.5 text-sm outline-none transition focus:border-accent"
+        />
+        <button
+          type="submit"
+          disabled={!value.trim()}
+          className="rounded-lg border border-border bg-surface-raised px-4 text-sm transition hover:border-accent disabled:opacity-40"
+        >
+          Send
+        </button>
+      </form>
+    </div>
   );
 }
