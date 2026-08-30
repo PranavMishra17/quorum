@@ -147,6 +147,49 @@ export class ScopedAgentContext {
     return ((data ?? []) as Message[]).reverse();
   }
 
+  /** This chat's type and name. Used to shape the prompt and the gate input. */
+  async chatSummary(): Promise<{ type: 'dm' | 'group' | 'agent'; name: string | null }> {
+    const { data, error } = await this.db
+      .from('chats')
+      .select('type, name')
+      .eq('id', this.chatId)
+      .single();
+    if (error) throw error;
+    return data as { type: 'dm' | 'group' | 'agent'; name: string | null };
+  }
+
+  /**
+   * Display names for everyone who appears in this chat's history.
+   *
+   * Note it resolves names for SENDERS, not for arbitrary users — the query is
+   * bounded by this chat's messages and membership. A method that took a user
+   * id and returned a profile would be a directory lookup wearing a context's
+   * clothes.
+   */
+  async speakerNames(): Promise<Map<string, string>> {
+    const [{ data: members }, { data: senders }] = await Promise.all([
+      this.db.from('chat_members').select('user_id').eq('chat_id', this.chatId),
+      this.db.from('messages').select('sender_id').eq('chat_id', this.chatId).not('sender_id', 'is', null),
+    ]);
+
+    const ids = new Set<string>();
+    for (const r of (members ?? []) as { user_id: string }[]) ids.add(r.user_id);
+    for (const r of (senders ?? []) as { sender_id: string | null }[]) {
+      if (r.sender_id) ids.add(r.sender_id);
+    }
+    if (ids.size === 0) return new Map();
+
+    const { data, error } = await this.db
+      .from('profiles')
+      .select('id, display_name')
+      .in('id', [...ids]);
+    if (error) throw error;
+
+    return new Map(
+      ((data ?? []) as { id: string; display_name: string }[]).map((p) => [p.id, p.display_name]),
+    );
+  }
+
   /** Files attached to this chat. A tool reaching for a file goes through here. */
   async listFiles(): Promise<FileRow[]> {
     await this.assertActorAuthorised();

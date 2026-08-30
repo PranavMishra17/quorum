@@ -9,16 +9,18 @@ commit as the work it describes, so it is never stale. Detail lives in
 ## At a glance
 
 ```
-PHASE 1  MVP · submittable                    ██████████░░░░░░  ~60%   ← WE ARE HERE
+PHASE 1  MVP · submittable                    ████████████████  ~95%   ← WE ARE HERE
 PHASE 2  Memory + agent depth + polish        ██░░░░░░░░░░░░░░  ~15%
 PHASE 3  Tools, capability, polish, submit    ░░░░░░░░░░░░░░░░    0%
 ```
 
-**Right now:** the database layer and the client trio are done — 9 migrations,
-158 assertions, CI green. `ScopedAgentContext` exists and its capability
-invariant is enforced by a test, verified by negative control.
+**Right now:** Phase 1 is code-complete. 9 migrations, auth, chat UI, the LLM
+seam, the response gate and the turn pipeline all exist; 241 assertions pass and
+CI is green. What remains is running it against a real Supabase project, which
+needs provisioning.
 
-**Immediately next:** Google auth + seeded dev login → chat list UI.
+**Immediately next:** provision Supabase + Vercel, `pnpm seed:dev`, then walk
+the demo. After that, Phase 2 — memory retrieval and the internal view.
 
 > Phase 2 shows progress already because the memory *schema* and its isolation
 > tests landed with the migrations. That was deliberate: the schema is one
@@ -67,38 +69,38 @@ Each row's **Proof** column names what makes it done. "It compiles" is not proof
 | ✅ | `lib/db/server.ts` — session-bound, `getClaims()` not `getSession()` (**T6**) | uses getClaims; acts as the user |
 | ✅ | `lib/db/scoped-agent.ts` — the **only** service-role site | 18 assertions; **negative control passed** |
 | 🟡 | `lib/db/types.ts` — hand-authored placeholder | replaced by `supabase gen types` once provisioned |
-| ⬜ | `proxy.ts` — UX redirect only, **not** a guard (**T7**) | documented + no authz decision in it |
-| ⬜ | `app/auth/callback/route.ts` — PKCE, `no-store` (**T8**) | header asserted |
+| ✅ | `proxy.ts` — UX redirect only, **not** a guard (**T7**) | Next recognises it; no authz decision in it |
+| ✅ | `app/auth/callback/route.ts` — PKCE, `no-store` on every path (**T8**) | open-redirect guarded |
 
-### 1.3 Auth and identity — **NEXT**
-
-| ✔ | Item | Proof |
-|---|---|---|
-| ⬜ | Google OAuth end to end | sign-in works on the deployed URL |
-| ⬜ | Seeded dev login, hard-gated to non-production | boundary-checker rule; 5 users with preset clearances |
-| ⬜ | Profile bootstrap on first sign-in | a new user gets a row |
-
-### 1.4 Chat surface
+### 1.3 Auth and identity — **COMPLETE**
 
 | ✔ | Item | Proof |
 |---|---|---|
-| ⬜ | Chat list (the permanent fallback UI — D-017) | two sessions converse, a third sees nothing |
-| ⬜ | Message list + composer, optimistic send | reconciles against the persisted row |
-| ⬜ | Realtime subscription | new messages arrive without reload |
-| ⬜ | Message rendering: human left, agent right, per-user colour | agent is never mistaken for a person |
-| ⬜ | Output sanitisation at render (**R7 — Phase 1, not 3**) | no auto-loading remote images; link beacons blocked |
+| 🟡 | Google OAuth end to end | code done; needs a provisioned project to verify |
+| ✅ | Seeded dev login, hard-gated to non-production | 10 assertions + a boundary rule, both negative-controlled |
+| ✅ | Profile bootstrap on first sign-in | inserts via the session client, so RLS still enforces self-only |
 
-### 1.5 The agent speaks
+### 1.4 Chat surface — **COMPLETE**
 
 | ✔ | Item | Proof |
 |---|---|---|
-| ⬜ | `lib/llm/provider.ts` interface + `errors.ts` typed union | swapping providers is one file |
-| ⬜ | `lib/llm/anthropic.ts`, SDK at `maxRetries: 0` (**T9**) | a model call produces an `llm_calls` row |
-| ⬜ | `llm_calls` written **before** the call | a killed call still leaves a row |
-| ⬜ | `lib/events/log.ts` append-only writer | every agent action writes an event |
-| ⬜ | `lib/agent/gate.ts` — deterministic chain, rules 1–6 | pure, unit-tested, no DB |
-| ⬜ | Gate judge, discrete verdict (D-020) | fails closed on error/timeout/malformed |
-| ⬜ | `lib/agent/orchestrator.ts` — the turn pipeline | agent answers when mentioned, silent in an unaddressed DM |
+| ✅ | Chat list (the permanent fallback UI — D-017) | no membership clause in the query; RLS filters |
+| ✅ | Message list + composer, optimistic send | reconciles via Realtime, not by appending |
+| ✅ | Realtime subscription | limitation T11 stated in code, not hidden |
+| ✅ | Message rendering: human left, agent right, per-user colour | agent is monochrome + monospace label |
+| ✅ | Output sanitisation at render (**R7 — Phase 1, not 3**) | 14 assertions; codebase-wide scan, negative-controlled |
+
+### 1.5 The agent speaks — **COMPLETE**
+
+| ✔ | Item | Proof |
+|---|---|---|
+| ✅ | `lib/llm/provider.ts` interface + `errors.ts` typed union | 16 assertions; spend-cap is not retryable |
+| ✅ | `lib/llm/anthropic.ts`, SDK at `maxRetries: 0` (**T9**) | per-model thinking/effort read from config |
+| ✅ | `llm_calls` written **before** the call | status + started_at/finished_at, not latency_ms |
+| ✅ | `lib/events/log.ts` append-only writer | ids come from ctx, never from arguments |
+| ✅ | `lib/agent/gate.ts` — deterministic chain, rules 1–6 | 25 assertions; pure, no DB, no clock |
+| ✅ | Gate judge, discrete verdict (D-020) | 18 assertions; every failure path resolves to silence |
+| ✅ | `lib/agent/orchestrator.ts` — the turn pipeline | rate limit above the gate; a turn failure never kills the chat |
 
 **Phase 1 exit gate:** deployed; two real users converse; the agent speaks
 appropriately; a non-member gets nothing. Submittable.
