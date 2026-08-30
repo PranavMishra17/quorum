@@ -212,6 +212,28 @@ describe('send_message_and_start_turn — idempotency', () => {
   });
 });
 
+describe('the public RPC surface', () => {
+  it('can_access_chat_for is NOT callable by a signed-in client', async () => {
+    // It takes BOTH ids as parameters, so a client holding it could enumerate
+    // the entire authorisation matrix — "can user X see chat Y" for every pair.
+    // Granted to service_role only.
+    const err = await as(u.Bob, async (c) =>
+      c.query('select public.can_access_chat_for($1,$2)', [gatedChat, u.Alice])
+        .then(() => null).catch((e: Error) => e.message));
+    expect(err).toMatch(/permission denied/i);
+  });
+
+  it('and it returns the same verdict as both axes together', async () => {
+    // Alice is a cleared member; Bob is an under-cleared member; Carol is neither.
+    const check = async (user: string, chat: string) =>
+      (await admin.query('select public.can_access_chat_for($1,$2) ok', [chat, user])).rows[0].ok;
+    expect(await check(u.Alice, gatedChat)).toBe(true);
+    expect(await check(u.Bob, gatedChat)).toBe(false);
+    expect(await check(u.Carol, openChat)).toBe(false);
+    expect(await check(u.Bob, openChat)).toBe(true);
+  });
+});
+
 describe('agent_events and llm_calls', () => {
   beforeAll(async () => {
     await admin.query(

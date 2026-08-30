@@ -54,8 +54,8 @@ only and never the sole guard.
 
 ## 2. Where the project is right now
 
-**Nothing is implemented.** The repository is scaffolded, configured, planned,
-researched, and tested-in-outline. There is no application code.
+**The database layer is complete and proven; the application layer is not
+started.** Live status, phase by phase: [PLAN.md](PLAN.md).
 
 | Exists | State |
 |---|---|

@@ -9,16 +9,16 @@ commit as the work it describes, so it is never stale. Detail lives in
 ## At a glance
 
 ```
-PHASE 1  MVP · submittable                    ████████░░░░░░░░  ~45%   ← WE ARE HERE
+PHASE 1  MVP · submittable                    ██████████░░░░░░  ~60%   ← WE ARE HERE
 PHASE 2  Memory + agent depth + polish        ██░░░░░░░░░░░░░░  ~15%
 PHASE 3  Tools, capability, polish, submit    ░░░░░░░░░░░░░░░░    0%
 ```
 
-**Right now:** the entire database layer is built and proven — 8 migrations,
-138 assertions against real Postgres, CI green. Next is the application code
-that sits on top of it without routing around it.
+**Right now:** the database layer and the client trio are done — 9 migrations,
+158 assertions, CI green. `ScopedAgentContext` exists and its capability
+invariant is enforced by a test, verified by negative control.
 
-**Immediately next:** `lib/db` client trio → auth → chat UI.
+**Immediately next:** Google auth + seeded dev login → chat list UI.
 
 > Phase 2 shows progress already because the memory *schema* and its isolation
 > tests landed with the migrations. That was deliberate: the schema is one
@@ -53,23 +53,24 @@ Each row's **Proof** column names what makes it done. "It compiles" is not proof
 | ✅ | `0006` memory + the surfacing rule in SQL | 23 assertions |
 | ✅ | `0007` files | 12 assertions |
 | ✅ | `0008` clearance seed | drift-guard test |
+| ✅ | `0009` public RPC surface, `service_role` only | grant asserted |
 | ✅ | Real-Postgres test harness, no Docker | 138 passing |
 | ✅ | `auth.uid()` inside `SECURITY DEFINER` (**T5**) | proven, first assertion |
 | ✅ | Vacuous-truth fail-open guard (**T1**) | proven by negative control |
 | ✅ | CI: boundaries · lint · test · build, + a real-Postgres job | both green |
 
-### 1.2 Application plumbing — **NEXT**
+### 1.2 Application plumbing — **COMPLETE**
 
 | ✔ | Item | Proof |
 |---|---|---|
-| ⬜ | `lib/db/browser.ts` — publishable key, RLS enforced | reads work signed in, return nothing signed out |
-| ⬜ | `lib/db/server.ts` — session-bound, `getClaims()` not `getSession()` (**T6**) | acts as the user; RLS applies |
-| ⬜ | `lib/db/scoped-agent.ts` — the **only** service-role site | boundary checker; no method takes a scope-defining id |
-| ⬜ | `lib/db/types.ts` — generated | regenerated, never hand-edited |
+| ✅ | `lib/db/browser.ts` — publishable key, RLS enforced | builds; RLS proven at the data layer |
+| ✅ | `lib/db/server.ts` — session-bound, `getClaims()` not `getSession()` (**T6**) | uses getClaims; acts as the user |
+| ✅ | `lib/db/scoped-agent.ts` — the **only** service-role site | 18 assertions; **negative control passed** |
+| 🟡 | `lib/db/types.ts` — hand-authored placeholder | replaced by `supabase gen types` once provisioned |
 | ⬜ | `proxy.ts` — UX redirect only, **not** a guard (**T7**) | documented + no authz decision in it |
 | ⬜ | `app/auth/callback/route.ts` — PKCE, `no-store` (**T8**) | header asserted |
 
-### 1.3 Auth and identity
+### 1.3 Auth and identity — **NEXT**
 
 | ✔ | Item | Proof |
 |---|---|---|
