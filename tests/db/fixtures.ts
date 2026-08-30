@@ -107,10 +107,77 @@ export async function removeMember(
   );
 }
 
+/**
+ * Learn a memory item, snapshotting the audience exactly as extraction will:
+ * the ACTIVE members of the origin chat at this instant.
+ *
+ * Taking the snapshot here rather than passing it in is deliberate — it means
+ * the tests exercise the same "who was in the room" logic the real extractor
+ * must, instead of asserting against a hand-written audience that could quietly
+ * disagree with production.
+ */
+export async function learnMemory(
+  admin: Client,
+  opts: {
+    subject: string;
+    originChat: string;
+    content: string;
+    clearanceLevel?: number;
+    sourceType?: 'stated' | 'inferred';
+    confidence?: number;
+    status?: 'candidate' | 'active' | 'superseded' | 'stale';
+    expiresAt?: string | null;
+    /** Override the snapshot. Only for testing the empty-audience edge case. */
+    audience?: string[];
+  },
+): Promise<string> {
+  const res = await admin.query(
+    `insert into public.memory_items
+       (subject_user_id, origin_chat_id, content, clearance_level,
+        source_type, confidence, status, expires_at)
+     values ($1,$2,$3,$4,$5,$6,$7,$8)
+     returning id`,
+    [
+      opts.subject, opts.originChat, opts.content, opts.clearanceLevel ?? 0,
+      opts.sourceType ?? 'stated', opts.confidence ?? 0.9,
+      opts.status ?? 'active', opts.expiresAt ?? null,
+    ],
+  );
+  const id = res.rows[0].id as string;
+
+  if (opts.audience) {
+    for (const userId of opts.audience) {
+      await admin.query(
+        `insert into public.memory_audience (memory_item_id, user_id) values ($1,$2)`,
+        [id, userId],
+      );
+    }
+  } else {
+    await admin.query(
+      `insert into public.memory_audience (memory_item_id, user_id)
+       select $1, m.user_id from public.chat_members m
+       where m.chat_id = $2 and m.status = 'member'`,
+      [id, opts.originChat],
+    );
+  }
+  return id;
+}
+
+/** What the surfacing rule admits into a given chat. Server-side path only. */
+export async function visibleMemory(admin: Client, chatId: string): Promise<string[]> {
+  const res = await admin.query(
+    `select content from private.memory_visible_in_chat($1) order by content`,
+    [chatId],
+  );
+  return res.rows.map((r) => r.content as string);
+}
+
 /** Wipe all fixture data between suites, leaving the schema intact. */
 export async function truncateAll(admin: Client): Promise<void> {
   await admin.query(`
-    truncate public.chat_members, public.chats, public.user_clearances,
+    truncate public.memory_audience, public.memory_items,
+             public.agent_events, public.llm_calls, public.messages,
+             public.chat_members, public.chats, public.user_clearances,
              public.profiles restart identity cascade;
     delete from auth.users;
   `);
