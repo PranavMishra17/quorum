@@ -127,12 +127,12 @@ opened at `REPEATABLE READ`. Callers need a `40001` retry.
 `search_path = ''`, and re-apply `auth.uid()` inside it or it becomes an
 unscoped read.
 
-**T5 — `auth.uid()` inside `SECURITY DEFINER` is unverified.** R1 could not
-source this from primary docs, and **the entire membership predicate rests on
-it.** Make it the *first* assertion in `tests/authorization/rls.test.ts`: set
-`request.jwt.claim.sub`, `SET ROLE authenticated`, call a `SECURITY DEFINER`
-function returning `auth.uid()`, assert the round-trip. Do this before building
-on it.
+**T5 — `auth.uid()` inside `SECURITY DEFINER` — RESOLVED, it works.** R1 could
+not source this from primary docs and the entire membership predicate rests on
+it, so it was settled empirically first. GUCs are session-scoped and are not
+reset by the role switch, so `auth.uid()` resolves correctly inside a
+`SECURITY DEFINER` body. Proven in `tests/authorization/rls-foundation.test.ts`.
+Do not remove that test — it is load-bearing for every policy in the project.
 
 **T6 — `getClaims()`, never `getSession()`, server-side.** `getSession()` does
 not revalidate; Supabase says not to trust it. An authorisation decision made on

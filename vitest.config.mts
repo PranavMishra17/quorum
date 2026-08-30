@@ -13,6 +13,8 @@ export default defineConfig({
      */
     fileParallelism: false,
     globalSetup: ['tests/global-setup.ts'],
+    // Starting Postgres and applying every migration takes a moment.
+    hookTimeout: 120_000,
     setupFiles: ['tests/setup.ts'],
     testTimeout: 20_000,
   },

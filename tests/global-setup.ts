@@ -1,24 +1,78 @@
 import { config } from 'dotenv';
+import EmbeddedPostgres from 'embedded-postgres';
+import { Client } from 'pg';
+import { resetDatabase } from './db/harness';
 
 /**
- * Runs ONCE, before any test file.
+ * Starts a real PostgreSQL for the authorization suites. Runs once, before any
+ * test file.
  *
- * Its only job is to say loudly when the authorization suites are not actually
- * running. The trap this closes: a reviewer runs `pnpm test`, sees green, and
- * concludes the RLS and authorization claims are verified. Without a database
- * they were skipped — and a silent skip is indistinguishable from a pass.
+ * No Docker. `embedded-postgres` ships genuine Postgres binaries and runs them
+ * directly, which matters because the alternative — an in-JS Postgres emulator —
+ * does not implement row-level security, and RLS is the thing under test. A
+ * harness that cannot enforce a policy cannot verify one.
  *
- * Written with process.stderr.write rather than console.warn because Vitest
- * intercepts console output from setup files and swallows it.
+ * If TEST_DATABASE_URL is already set (CI, or a local `supabase start`), that
+ * database is used instead and nothing is spawned.
  */
-export default function globalSetup() {
+
+const PORT = 54329;
+const DATA_DIR = './.pgdata';
+
+let instance: EmbeddedPostgres | null = null;
+
+async function canConnect(url: string): Promise<boolean> {
+  const client = new Client({ connectionString: url, connectionTimeoutMillis: 2000 });
+  try {
+    await client.connect();
+    await client.end();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export default async function setup() {
   config({ path: '.env.local', quiet: true });
 
-  if (!process.env.DATABASE_URL) {
-    process.stderr.write(
-      '\n\x1b[33m  ⚠  DATABASE_URL is not set — authorization and RLS suites are SKIPPED.\n' +
-        '     A green run here does NOT mean the authorization claims are verified.\n' +
-        '     Run `supabase start`, or see the `database` job in .github/workflows/ci.yml.\x1b[0m\n\n',
-    );
+  const external = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
+  if (external) {
+    process.env.TEST_DATABASE_URL = external;
+    process.stderr.write('\n  ▸ using external database from TEST_DATABASE_URL\n');
+    await resetDatabase();
+    return;
   }
+
+  const url = `postgresql://postgres:postgres@localhost:${PORT}/postgres`;
+
+  // A server left running by a previous run is reusable — and much faster than
+  // a fresh initdb. resetDatabase() drops everything either way, so a warm
+  // instance cannot leak state between runs.
+  if (await canConnect(url)) {
+    process.env.TEST_DATABASE_URL = url;
+    await resetDatabase();
+    return;
+  }
+
+  instance = new EmbeddedPostgres({
+    databaseDir: DATA_DIR,
+    user: 'postgres',
+    password: 'postgres',
+    port: PORT,
+    persistent: true,
+  });
+
+  try {
+    await instance.initialise();
+  } catch {
+    // Already initialised from a previous run; only the start below matters.
+  }
+  await instance.start();
+
+  process.env.TEST_DATABASE_URL = url;
+  await resetDatabase();
+
+  return async () => {
+    if (instance) await instance.stop();
+  };
 }

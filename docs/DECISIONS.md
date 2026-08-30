@@ -554,11 +554,14 @@ Recorded here rather than left to look like oversights.
 - **Aggregation across separately-authorised answers.** Two individually
   authorised answers in one chat can let a human infer a third, unauthorised
   fact. No system surveyed claims to solve this; the literature names it open.
-- **Whether `auth.uid()` survives a `SECURITY DEFINER` role switch.** R1 could
-  not find this stated verbatim in a primary source — it is inferred from two
-  documented facts. **The entire membership-predicate design rests on it.** It is
-  cheap to settle and must be the *first* assertion in
-  `tests/authorization/rls.test.ts`.
+- ~~**Whether `auth.uid()` survives a `SECURITY DEFINER` role switch.**~~
+  **RESOLVED empirically — it does.** R1 could not source this from primary
+  documentation and inferred it from two documented facts, so rather than build
+  the membership predicate on an inference it was settled first, against a real
+  Postgres 18.4: GUCs are session-scoped and the role switch does not reset
+  them. Asserted in `tests/authorization/rls-foundation.test.ts`, which also
+  pins that the test role cannot bypass RLS and *does* hold table grants — so a
+  denial in any later test comes from the policy, not from a missing `GRANT`.
 - **`GATE.judgeContextMessages: 8`.** No source gives a principled number. Not
   contradicted; also not derived. Describe it as chosen, not derived.
 - **The false-positive/false-negative asymmetry behind D-008.** The direction is

@@ -47,3 +47,6 @@ next-env.d.ts
 research/reports/*.draft.md
 
 .claude*
+
+# embedded postgres data dir (test harness)
+.pgdata/
