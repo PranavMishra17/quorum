@@ -1,10 +1,13 @@
-import { KILL_SWITCHES, GATE, RATE_LIMITS } from '@/config';
+import { KILL_SWITCHES, GATE, RATE_LIMITS, MEMORY } from '@/config';
 import { ScopedAgentContext } from '@/lib/db/scoped-agent';
 import { logEvent } from '@/lib/events/log';
 import { AnthropicProvider } from '@/lib/llm/anthropic';
 import { instrument } from '@/lib/llm/instrumented';
 import { toLlmError } from '@/lib/llm/errors';
-import { assembleContext } from './context';
+import { assembleContext, type MemoryLine } from './context';
+import { retrieveMemory } from '@/lib/memory/retrieve';
+import { extractMemory } from '@/lib/memory/extract';
+
 import { evaluateChain, type GateDecision, type GateInput } from './gate';
 import { judge } from './judge';
 
@@ -18,10 +21,10 @@ import { judge } from './judge';
  * "the agent said nothing" and "the agent never ran" look identical in a chat
  * window and must not look identical in the log.
  *
- * MEMORY IS DELIBERATELY ABSENT. A half-built memory system with no isolation
- * is worse than none — it would demonstrate the exact leak this project claims
- * to solve. The schema exists and is proven; nothing reads it until the
- * retrieval path is built and its isolation tests pass.
+ * Memory joins the pipeline here, and only now: the isolation tests were
+ * written and passing before `retrieve.ts` existed. A half-built memory system
+ * with no isolation is worse than none — it demonstrates the exact leak this
+ * project claims to solve.
  */
 
 export interface TurnParams {
@@ -87,6 +90,13 @@ export async function runTurn(params: TurnParams): Promise<TurnResult> {
     }
 
     const agentMessageId = await speak(ctx, params.messageId);
+
+    // Extraction runs AFTER the reply is persisted and broadcast (D-013). By
+    // this point the user already has their answer, so a slow or failing
+    // extraction costs nothing user-visible.
+    if (KILL_SWITCHES.memoryWriteEnabled) {
+      await extractTurnMemory(ctx, agentMessageId);
+    }
 
     await logEvent(ctx, 'turn_completed', {
       spoke: true,
@@ -224,12 +234,34 @@ async function speak(ctx: ScopedAgentContext, messageId: string): Promise<string
     ctx.activeMemberIds(),
   ]);
 
+  const current = history.find((m) => m.id === messageId);
+
+  // Retrieval. Everything it returns has already passed the surfacing rule in
+  // SQL — assembly below does no filtering of its own and must never be handed
+  // an unfiltered set.
+  const retrieved = await retrieveMemory(ctx, {
+    query: current?.content ?? '',
+    // Speaker presence: a fact about someone who just spoke is far more likely
+    // to matter than one about a person who has not appeared.
+    recentSpeakerIds: history
+      .slice(-8)
+      .map((m) => m.sender_id)
+      .filter((id): id is string => Boolean(id)),
+  });
+
+  const memory: MemoryLine[] = retrieved.items.map((i) => ({
+    subjectName: names.get(i.subjectUserId) ?? 'Someone',
+    content: i.content,
+    sourceType: i.sourceType,
+  }));
+
   const assembled = assembleContext({
     chatName: chat.name,
     chatType: chat.type,
     memberNames: memberIds.map((id) => names.get(id) ?? 'Someone'),
     history,
     speakerNames: names,
+    memory,
   });
 
   if (assembled.dropped.length > 0) {
@@ -256,4 +288,34 @@ async function speak(ctx: ScopedAgentContext, messageId: string): Promise<string
 
   const message = await ctx.writeAgentMessage(text);
   return message.id;
+}
+
+/**
+ * Deferred extraction.
+ *
+ * `touchedUntrustedContent` is hardcoded false because no tool exists yet. It
+ * is threaded through rather than omitted so that adding the first tool is a
+ * change to one call site, not a search for where the flag should have gone —
+ * and getting it wrong is T10, a fact planted into memory forever.
+ */
+async function extractTurnMemory(
+  ctx: ScopedAgentContext,
+  agentMessageId: string,
+): Promise<void> {
+  const [history, names] = await Promise.all([
+    ctx.recentMessages(MEMORY.extraction.contextMessages),
+    ctx.speakerNames(),
+  ]);
+
+  await extractMemory(ctx, {
+    provider: instrument(new AnthropicProvider(), ctx, agentMessageId),
+    transcript: history.map((m) => ({
+      speakerId: m.sender_id,
+      speaker: names.get(m.sender_id ?? '') ?? 'Someone',
+      content: m.content,
+      isAgent: m.sender_type === 'agent',
+    })),
+    touchedUntrustedContent: false,
+    originMessageId: agentMessageId,
+  });
 }

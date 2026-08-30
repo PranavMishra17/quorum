@@ -51,7 +51,13 @@ const RULES = [
   {
     id: 'service-role-key',
     // CLAUDE.md non-negotiable #2.
-    pattern: /SUPABASE_SECRET_KEY|service_role/,
+    //
+    // Matches the KEY, not the word "service_role". The key is the capability:
+    // a service-role client cannot be constructed without it, so the key name
+    // is the thing worth chasing. The bare phrase appears legitimately in SQL
+    // grants and in test names ("...is service_role only"), and flagging those
+    // trains people to rename around the checker rather than to respect it.
+    pattern: /SUPABASE_SECRET_KEY/,
     allow: ['config/env.ts', 'lib/db/scoped-agent.ts'],
     why:
       'The service-role key bypasses RLS entirely. It may be referenced in ' +

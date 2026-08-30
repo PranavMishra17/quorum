@@ -31,6 +31,12 @@ export interface AssembledContext {
   estimatedTokens: number;
 }
 
+export interface MemoryLine {
+  subjectName: string;
+  content: string;
+  sourceType: 'stated' | 'inferred';
+}
+
 export interface AssembleParams {
   chatName: string | null;
   chatType: string;
@@ -38,6 +44,12 @@ export interface AssembleParams {
   history: Message[];
   /** Maps sender_id to a display name. */
   speakerNames: Map<string, string>;
+  /**
+   * Memory items that have ALREADY passed the surfacing rule. Anything reaching
+   * this parameter is authorised for this chat; assembly does no filtering and
+   * must never be given an unfiltered set.
+   */
+  memory?: MemoryLine[];
 }
 
 function systemPrompt(params: AssembleParams): string {
@@ -59,8 +71,41 @@ How to write here:
 - If you do not know, say so plainly and stop.
 - Never claim to have done something you have not done.
 
-You know only what is in this conversation. If you appear to know something
-about someone that is not here, you are wrong — say you are not sure instead.`;
+You know only what is in this conversation and in the notes below, if any. If
+you seem to know something that is in neither, you are wrong — say you are not
+sure instead.${memorySection(params)}`;
+}
+
+/**
+ * Render the memory block.
+ *
+ * Everything here has already passed the surfacing rule in SQL, so the model is
+ * never asked to decide what it may repeat — it cannot leak what it was not
+ * given. The instruction below is about TACT, not about authorisation, and the
+ * distinction is worth keeping straight: a prompt asking the model to be
+ * discreet would be a mitigation, whereas not sending the item is a control.
+ *
+ * `stated` and `inferred` are surfaced because they mean different things to a
+ * reader: one is what the person said, the other is what was deduced about
+ * them, and the agent should not present the second as the first.
+ */
+function memorySection(params: AssembleParams): string {
+  const memory = params.memory ?? [];
+  if (memory.length === 0) return '';
+
+  const lines = memory
+    .map((m) => `- ${m.subjectName}: ${m.content}${m.sourceType === 'inferred' ? ' (inferred, not confirmed by them)' : ''}`)
+    .join('\n');
+
+  return `
+
+What you already know about the people here:
+${lines}
+
+Everyone in this conversation is cleared to hear all of the above — it has been
+filtered before reaching you. Use it where it helps. Do not recite it, do not
+announce that you remember things, and do not bring up something personal just
+because you can.`;
 }
 
 /**
@@ -72,8 +117,15 @@ about someone that is not here, you are wrong — say you are not sure instead.`
  * has failed rather than degraded.
  */
 export function assembleContext(params: AssembleParams): AssembledContext {
-  const system = systemPrompt(params);
+  let system = systemPrompt(params);
   const dropped: string[] = [];
+
+  // Memory is dropped BEFORE history, per CONTEXT.dropOrder: losing a note is
+  // recoverable, losing the message being replied to is not.
+  if (estimateTokens(system) > CONTEXT.tokenBudget / 2 && (params.memory?.length ?? 0) > 0) {
+    system = systemPrompt({ ...params, memory: [] });
+    dropped.push('memory');
+  }
 
   const all: ProviderMessage[] = params.history.map((m) => ({
     role: m.sender_type === 'agent' ? ('assistant' as const) : ('user' as const),

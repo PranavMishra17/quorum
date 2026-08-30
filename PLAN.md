@@ -10,7 +10,7 @@ commit as the work it describes, so it is never stale. Detail lives in
 
 ```
 PHASE 1  MVP · submittable                    ███████████████░  ~90%
-PHASE 2  Memory + agent depth + polish        ██░░░░░░░░░░░░░░  ~15%   ← WE ARE HERE
+PHASE 2  Memory + agent depth + polish        ████████░░░░░░░░  ~50%   ← WE ARE HERE
 PHASE 3  Tools, capability, polish, submit    ░░░░░░░░░░░░░░░░    0%
 ```
 
@@ -18,7 +18,8 @@ PHASE 3  Tools, capability, polish, submit    ░░░░░░░░░░░�
 genuine Phase 1 miss — chat creation — plus four items that were in the fan-out
 but never in this plan. All are listed below rather than quietly absorbed.
 
-**Immediately next:** the carried-over Phase 1 items, then memory retrieval.
+**Immediately next:** the agent internal view — the artifact that makes the
+memory filter visible — then the carried-over Phase 1 items.
 
 > Phase 2 shows progress already because the memory *schema* and its isolation
 > tests landed with the migrations. That was deliberate: the schema is one
@@ -128,13 +129,13 @@ appropriately; a non-member gets nothing. Submittable.
 |---|---|---|
 | ✅ | Memory schema + audience snapshot | 23 isolation assertions |
 | ✅ | The surfacing rule in SQL, filter-before-rank | negative control on the fail-open |
-| ⬜ | `lib/memory/audience.ts` — snapshot writer | snapshot is immutable after write |
-| ⬜ | `lib/memory/retrieve.ts` — filter → rank → cap | the **only** memory query site |
-| ⬜ | Ranking: `ts_rank` + recency + speaker presence (D-004) | weights sum to 1, already asserted |
-| ⬜ | Per-subject cap | one person cannot crowd out nineteen |
-| ⬜ | `lib/memory/extract.ts`, deferred via `after()` (D-013) | runs after delivery, never inline |
-| ⬜ | Untrusted-turn policy → `inferred` + `candidate` (**T10**) | a planted fact is never retrieved |
-| ⬜ | `lib/memory/conflict.ts` — deterministic, never the model (D-014) | stated > inferred; newer > older; ties write an event |
+| ✅ | `lib/memory/audience.ts` — snapshot writer | atomic with the item; refuses an empty audience |
+| ✅ | `lib/memory/retrieve.ts` — filter → rank → cap | 13 RPC assertions + 22 pure ranking/conflict |
+| ✅ | Ranking: `ts_rank` + recency + speaker presence (D-004) | pure and unit-tested; cannot leak by construction |
+| ✅ | Per-subject cap | asserted: a hogged subject cannot fill the budget |
+| ✅ | `lib/memory/extract.ts`, deferred (D-013) | runs after the reply is persisted and broadcast |
+| ✅ | Untrusted-turn policy → `inferred` + `candidate` (**T10**) | applied after the model speaks, so phrasing cannot evade it |
+| ✅ | `lib/memory/conflict.ts` — deterministic, never the model (D-014) | 13 assertions; model detects, code decides |
 | ⬜ | `ScopedAgentContext` re-reads authz per call (**T2**, D-009) | a mid-turn removal takes effect on the next read |
 | ⬜ | Group admin: invite, request, approve, remove, promote | non-admin refused (partly covered) |
 | ⬜ | Realtime channel force-close on removal (**T11**) | removed member stops receiving live |
