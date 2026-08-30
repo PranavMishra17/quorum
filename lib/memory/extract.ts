@@ -4,6 +4,7 @@ import { logEvent } from '@/lib/events/log';
 import type { LlmProvider } from '@/lib/llm/provider';
 import { learn, supersede } from './audience';
 import { resolve, type Candidate } from './conflict';
+import { extractPrompt } from '@/lib/agent/prompts';
 
 /**
  * Deferred memory extraction.
@@ -90,27 +91,7 @@ function isExtraction(v: unknown): v is Extraction {
   });
 }
 
-const SYSTEM = `You extract durable facts about people from a conversation, for an assistant that will use them in future conversations.
 
-Extract a fact only if it is:
-- about a specific named participant
-- likely to still be true and still useful weeks from now
-- something the assistant would be worse off not knowing
-
-Do NOT extract:
-- anything about the assistant itself
-- passing moods, jokes, pleasantries, or reactions
-- restatements of what was just said, or summaries of the conversation
-- anything you are guessing at to fill the quota — returning nothing is normal and correct
-
-Mark sourceType "stated" ONLY when the subject said it about themselves in this
-conversation. A claim by one person about another is "inferred", however
-confident it sounds, because the subject has not confirmed it.
-
-Mark volatile true for facts with a natural expiry — where someone is this week,
-what they are working on right now.
-
-Most turns contain nothing worth keeping. An empty list is the common answer.`;
 
 export interface ExtractParams {
   provider: LlmProvider;
@@ -146,7 +127,7 @@ export async function extractMemory(
 
     const result = await params.provider.structured<Extraction>({
       purpose: 'memory_extract',
-      system: SYSTEM,
+      system: extractPrompt(),
       messages: [{
         role: 'user',
         content: `Participants:\n${roster}\n\nConversation:\n${transcript}\n\nExtract durable facts, or return an empty list.`,

@@ -1,6 +1,7 @@
 import { GATE } from '@/config';
 import type { LlmProvider } from '@/lib/llm/provider';
 import type { GateDecision, Verdict } from './gate';
+import { judgePrompt } from './prompts';
 
 /**
  * The gate judge — consulted only when the deterministic chain falls through.
@@ -57,26 +58,7 @@ function isJudgeVerdict(v: unknown): v is JudgeVerdict {
   );
 }
 
-const SYSTEM = `You decide whether an assistant should speak in a group chat it is quietly present in.
 
-You are NOT deciding what to say. Only whether saying anything is appropriate.
-
-Respond only when at least one holds:
-- someone asked a question nobody present seems better placed to answer
-- someone is visibly stuck on something you could resolve
-- a factual error is being acted on
-
-Stay silent when:
-- people are talking to each other and it is going fine
-- the conversation is social, personal, or an aside
-- a reply would only acknowledge, agree, or summarise
-- you would be repeating something already said
-- you are unsure
-
-Silence is the default and the safe answer. A person who wants you will address
-you by name, and that bypasses this decision entirely — so declining to speak
-never blocks anyone. Interjecting when unwanted is far more costly than staying
-quiet when you might have helped.`;
 
 function renderTranscript(input: JudgeInput): string {
   const header = input.chatName
@@ -96,7 +78,7 @@ export async function judge(
   try {
     const result = await provider.structured<JudgeVerdict>({
       purpose: 'gate_judge',
-      system: SYSTEM,
+      system: judgePrompt(),
       messages: [{ role: 'user', content: renderTranscript(input) }],
       schema: SCHEMA,
       validate: isJudgeVerdict,

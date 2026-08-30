@@ -1,6 +1,9 @@
 import { CONTEXT } from '@/config';
 import type { Message } from '@/lib/db/types';
 import type { ProviderMessage } from '@/lib/llm/provider';
+import { replyPrompt, type MemoryLine } from './prompts';
+
+export type { MemoryLine };
 
 /**
  * Prompt assembly within a token budget.
@@ -8,6 +11,9 @@ import type { ProviderMessage } from '@/lib/llm/provider';
  * The budget is deliberately far below the model's 1M window: cost and
  * precision degrade long before the window does, and a prompt that includes
  * everything is not the same as a prompt that includes the right things.
+ *
+ * The prompt TEXT lives in `./prompts`. This file owns the budget and the
+ * trimming; it does not own the words.
  */
 
 /**
@@ -31,12 +37,6 @@ export interface AssembledContext {
   estimatedTokens: number;
 }
 
-export interface MemoryLine {
-  subjectName: string;
-  content: string;
-  sourceType: 'stated' | 'inferred';
-}
-
 export interface AssembleParams {
   chatName: string | null;
   chatType: string;
@@ -52,78 +52,33 @@ export interface AssembleParams {
   memory?: MemoryLine[];
 }
 
-function systemPrompt(params: AssembleParams): string {
-  const where = params.chatName
-    ? `You are in "${params.chatName}", a ${params.chatType} chat`
-    : `You are in a ${params.chatType} chat`;
-
-  return `You are Quorum, an assistant present in every conversation in this workspace.
-
-${where} with ${params.memberNames.length} people: ${params.memberNames.join(', ')}.
-
-You have already decided that speaking is appropriate — that decision is made
-before you are called, so do not deliberate about whether to reply. Reply.
-
-How to write here:
-- You are one voice among several, not a chat window. Be brief.
-- Answer the thing that was actually asked. No preamble, no summarising what
-  people just said back to them, no offering further help.
-- If you do not know, say so plainly and stop.
-- Never claim to have done something you have not done.
-
-You know only what is in this conversation and in the notes below, if any. If
-you seem to know something that is in neither, you are wrong — say you are not
-sure instead.${memorySection(params)}`;
-}
-
 /**
- * Render the memory block.
+ * Build the prompt, trimming to fit the budget.
  *
- * Everything here has already passed the surfacing rule in SQL, so the model is
- * never asked to decide what it may repeat — it cannot leak what it was not
- * given. The instruction below is about TACT, not about authorisation, and the
- * distinction is worth keeping straight: a prompt asking the model to be
- * discreet would be a mitigation, whereas not sending the item is a control.
- *
- * `stated` and `inferred` are surfaced because they mean different things to a
- * reader: one is what the person said, the other is what was deduced about
- * them, and the agent should not present the second as the first.
- */
-function memorySection(params: AssembleParams): string {
-  const memory = params.memory ?? [];
-  if (memory.length === 0) return '';
-
-  const lines = memory
-    .map((m) => `- ${m.subjectName}: ${m.content}${m.sourceType === 'inferred' ? ' (inferred, not confirmed by them)' : ''}`)
-    .join('\n');
-
-  return `
-
-What you already know about the people here:
-${lines}
-
-Everyone in this conversation is cleared to hear all of the above — it has been
-filtered before reaching you. Use it where it helps. Do not recite it, do not
-announce that you remember things, and do not bring up something personal just
-because you can.`;
-}
-
-/**
- * Build the prompt, trimming oldest history first when over budget.
- *
- * Trim order matters and follows `CONTEXT.dropOrder`: tool results go first
- * (bulky and already summarised), then memory, then old history. The current
- * message is never dropped — a turn that trims away the thing it is answering
- * has failed rather than degraded.
+ * Drop order follows `CONTEXT.dropOrder`: memory before history. Losing a note
+ * degrades the answer; losing the message being replied to breaks the turn. The
+ * current exchange is never dropped — a turn that trims away the thing it is
+ * answering has failed rather than degraded.
  */
 export function assembleContext(params: AssembleParams): AssembledContext {
-  let system = systemPrompt(params);
+  const memory = params.memory ?? [];
   const dropped: string[] = [];
 
-  // Memory is dropped BEFORE history, per CONTEXT.dropOrder: losing a note is
-  // recoverable, losing the message being replied to is not.
-  if (estimateTokens(system) > CONTEXT.tokenBudget / 2 && (params.memory?.length ?? 0) > 0) {
-    system = systemPrompt({ ...params, memory: [] });
+  let system = replyPrompt({
+    chatName: params.chatName,
+    chatType: params.chatType,
+    memberNames: params.memberNames,
+    memory,
+  });
+
+  // Memory goes first if the system prompt alone is eating the budget.
+  if (estimateTokens(system) > CONTEXT.tokenBudget / 2 && memory.length > 0) {
+    system = replyPrompt({
+      chatName: params.chatName,
+      chatType: params.chatType,
+      memberNames: params.memberNames,
+      memory: [],
+    });
     dropped.push('memory');
   }
 

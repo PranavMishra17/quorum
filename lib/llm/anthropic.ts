@@ -98,14 +98,22 @@ export class AnthropicProvider implements LlmProvider {
     const spec = specFor(params.purpose);
 
     return withRetry(tier, params.purpose, async () => {
-      const response = await getClient().messages.create(
-        {
-          ...requestShape(tier),
-          system: params.system,
-          messages: params.messages,
-        } as Parameters<Anthropic['messages']['create']>[0],
-        { signal: timeoutSignal(tier, params.signal) },
-      );
+      const request = {
+        ...requestShape(tier),
+        system: params.system,
+        messages: params.messages,
+      } as Parameters<Anthropic['messages']['create']>[0];
+      const options = { signal: timeoutSignal(tier, params.signal) };
+
+      // Tiers with a large max_tokens MUST use the streaming transport, or the
+      // request hits the SDK's HTTP timeout before the model finishes. This is
+      // not a UX feature — no partial output reaches a user here — it is what
+      // makes a long reply possible at all. `config/models.ts` marks which
+      // tiers need it, and tests/config.test.ts asserts the flag is set
+      // wherever max_tokens is large.
+      const response = tier.stream
+        ? await getClient().messages.stream(request, options).finalMessage()
+        : await getClient().messages.create(request, options);
 
       const msg = response as unknown as {
         content: unknown[];

@@ -34,6 +34,7 @@ Format per entry: **Context → Decision → Why → Status → Revisit if**.
 | D-026 | Idempotency RPC runs at READ COMMITTED, against R14's advice | settled |
 | D-027 | Discovery gated on clearance, not on membership | settled |
 | D-028 | No separate agent-turn endpoint; the turn runs in `after()` | settled |
+| D-029 | Streaming is a transport, not a UX feature | settled |
 | D-012 | Removed members lose access to history | settled (assumption) |
 | D-013 | Memory extraction is deferred, never inline | settled |
 | D-014 | Conflict resolution is deterministic, never delegated to the model | settled |
@@ -624,6 +625,44 @@ without re-sending a message. If turns ever need to be replayed or run longer
 than an invocation, this becomes a queue and an endpoint — which is exactly the
 "when would you introduce a queue" question R9 answered, and the trigger is
 recorded there.
+
+---
+
+## D-029 — Streaming is a transport concern, not a UX feature
+
+**Context.** `docs/ARCHITECTURE.md` listed `stream()` on the provider interface
+and drew the turn as "model call, streamed". `TIERS.converse` and `TIERS.reason`
+both set `stream: true`, and `tests/config.test.ts` asserts that any tier with a
+large `max_tokens` must — yet `complete()` used the non-streaming endpoint. The
+flag was decorative.
+
+**Decision.** `complete()` now uses the streaming transport whenever the tier
+says so. **No partial output reaches the browser.**
+
+**Why the transport half is not optional.** The SDK's HTTP timeout is shorter
+than a long generation at 8k–32k `max_tokens`. Without streaming, a long reply
+does not arrive slowly — it fails. This was a latent bug: the config said one
+thing and the implementation did another, and the test that would have caught it
+asserted only the config's self-consistency.
+
+**Why the UX half is deliberately skipped.** Token-by-token display would need
+one of two things, and both cost more than they return here:
+
+- *A held-open endpoint*, which contradicts D-028 and reintroduces the second
+  authorisation surface that decision exists to avoid.
+- *Persisting the reply early and updating it as chunks arrive*, so Realtime
+  carries the deltas. This is the elegant option — no new endpoint, no new
+  transport — and it is rejected because it would require an UPDATE path on
+  `messages`. That table currently has **no update policy for anyone**, which is
+  what lets the README call messages an immutable episodic record and what
+  guarantees an audience snapshot still describes the text it was taken from.
+  Trading that for a typing animation is a bad trade.
+
+**Against.** A ten-second silence before a long reply appears is a real
+usability cost, and "the agent is thinking" is exactly what streaming
+communicates. If this becomes the top complaint, the honest fix is a
+`message_streaming` table or a status column — additive, and leaving `messages`
+immutable — rather than making messages mutable.
 
 ---
 
