@@ -8,10 +8,12 @@ authorisation boundary.**
 Built as a take-home for Moritz Legal. TypeScript end to end: Next.js on Vercel,
 Postgres on Supabase.
 
-> **Status: pre-build.** The repository is scaffolded, configured, and planned;
-> application code has not been written yet. Sections marked *(planned)* describe
-> intended behaviour, not shipped behaviour. This notice comes out when the
-> build does. See [`docs/BUILD-PLAN.md`](docs/BUILD-PLAN.md) for what lands when.
+> **Status: built, not yet deployed.** Auth, chats, the response gate, the turn
+> pipeline, memory retrieval and extraction, and the agent internal view are all
+> implemented, with ~300 assertions passing against a real PostgreSQL. What has
+> not happened is a run against a provisioned Supabase project — so anything
+> requiring live Google OAuth is written and type-checked but not yet *observed*
+> working, and is not claimed as such. Live progress: [`PLAN.md`](PLAN.md).
 
 ---
 
@@ -158,7 +160,7 @@ permissive policy written at all**, and `SELECT`/`INSERT`/`UPDATE`/`DELETE`
 revoked from `anon` and `authenticated`. With no policy to grant access, no row
 is visible. Memory is reachable only through the server-side scoped path.
 
-### The agent is the dangerous actor *(planned)*
+### The agent is the dangerous actor
 
 The agent runs server-side and needs to read across chats to do its job. That
 makes it the single most likely path to a leak, so it never holds an unscoped
@@ -194,7 +196,7 @@ unintentional bug does not become cross-tenant data access.
 
 ---
 
-## When the agent speaks *(planned)*
+## When the agent speaks
 
 The agent is present everywhere and must decide whether to respond. Hybrid:
 a deterministic chain first, a model judge only for genuine ambiguity.
@@ -219,7 +221,7 @@ errors and timeouts also resolve to silence.
 Every evaluation writes a `gate_evaluated` event carrying the verdict, which
 rule fired, and the reason. Rate limiting sits above all of it.
 
-## The agent internal view *(planned)*
+## The agent internal view
 
 Each chat exposes an append-only log of everything the agent did: gate decisions
 and why, memory reads *including how many items the filter removed*, memory
@@ -230,7 +232,7 @@ This is deliberately the most prominent feature after the chat itself. A memory
 isolation rule you cannot see working is indistinguishable from one that does
 not work.
 
-## Tools and untrusted content *(planned)*
+## Tools and untrusted content
 
 File and web tools put attacker-controlled text into the model's context. The
 claim this project makes about that is deliberately narrow:
@@ -282,7 +284,7 @@ rate limits all live in [`config/`](config/) — not scattered through the code.
 
 ---
 
-## Tests that matter *(planned)*
+## Tests that matter
 
 The brief asks for the tests *considered important*, not for coverage. These are
 chosen so that each one defends a claim this README makes.
@@ -346,12 +348,21 @@ requirement, not because each one is obviously correct.
    defensible; the stricter reading was chosen deliberately.
 
    "Next read", not "the moment of removal", and the difference is not
-   pedantry. Supabase Realtime evaluates RLS when a subscription is
-   established and caches that result for the socket's lifetime, so a removed
-   member holding an **already-open subscription** can keep receiving new
-   messages until the socket drops. Any claim of instantaneous revocation would
-   be false on a live demo. Forcibly closing those channels on removal is the
-   fix, and it is on the verification list rather than assumed.
+   pedantry. Supabase Realtime evaluates RLS when a subscription is established
+   and caches that result for the socket's lifetime, so a removed member
+   holding an **already-open subscription** would keep receiving new messages
+   until the socket dropped.
+
+   Removal now broadcasts a revocation to that user, and their client tears
+   down its subscriptions on receipt — which narrows the window from "until the
+   socket drops" to "within a round trip". It is worth being precise about what
+   that is: **cooperative, not enforcement.** The teardown runs in the browser
+   being revoked, so a modified client could ignore it and keep receiving new
+   messages on that one channel until the socket closed. Every other read —
+   history, roster, files, memory — is refused immediately by RLS. Closing the
+   window properly needs server-side socket termination, which Supabase does
+   not currently expose. Hence the guarantee stated here is the honest one:
+   **access ends on the next read.**
 3. **Memory audience is a snapshot at learn time, not current membership.**
    Someone who joins later was not present when the thing was said.
 4. **Memory visibility never widens automatically.** Broadening requires an

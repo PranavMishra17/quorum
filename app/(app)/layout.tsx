@@ -43,6 +43,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             Quorum
           </Link>
 
+          <Link href="/usage" className="text-xs text-muted transition hover:text-foreground">
+            Usage
+          </Link>
+
           <div className="ml-auto flex items-center gap-3">
             {/* The clearance badge is deliberately always visible: the whole
                 product hinges on the reader knowing what they are cleared for. */}

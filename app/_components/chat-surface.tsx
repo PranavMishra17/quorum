@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useOptimistic, useRef, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/db/browser';
 import { MessageContent } from './message-content';
 
@@ -27,6 +28,8 @@ export function ChatSurface({
   initialMessages: UiMessage[];
   people: Record<string, { name: string; color: string }>;
 }) {
+  const router = useRouter();
+  const [revoked, setRevoked] = useState(false);
   const [messages, setMessages] = useState<UiMessage[]>(initialMessages);
   const [optimistic, addOptimistic] = useOptimistic(
     messages,
@@ -40,14 +43,19 @@ export function ChatSurface({
   }, [optimistic.length]);
 
   /**
-   * Realtime.
+   * Realtime, and T11.
    *
-   * A known limitation, stated rather than hidden: Supabase Realtime evaluates
-   * row-level security when the subscription is established and caches that
-   * result for the socket's lifetime. A member removed mid-session keeps
-   * receiving messages on an already-open socket until it drops. The fix is to
-   * force-close their channels on removal, which is Phase 2 work; until then
-   * the README says "next read", not "immediately".
+   * Supabase Realtime evaluates row-level security when a subscription is
+   * established and caches that result for the socket's lifetime. A member
+   * removed mid-session therefore keeps receiving new messages on an
+   * already-open socket, even though their next READ is refused.
+   *
+   * The second subscription below listens for a revocation broadcast aimed at
+   * this user and tears everything down. It narrows the window from "until the
+   * socket drops" to "within a round trip" — but it is COOPERATIVE, not
+   * enforcement: this code runs in the browser being revoked. Closing the
+   * window properly needs a server-side socket termination that Supabase does
+   * not expose. The README says "next read" for exactly this reason.
    */
   useEffect(() => {
     const supabase = createClient();
@@ -86,6 +94,21 @@ export function ChatSurface({
     };
   }, [chatId, people]);
 
+  useEffect(() => {
+    const supabase = createClient();
+    const revocation = supabase
+      .channel(`membership:${meId}`)
+      .on('broadcast', { event: 'revoked' }, (msg) => {
+        const payload = msg.payload as { chatId?: string };
+        if (payload?.chatId && payload.chatId !== chatId) return;
+        setRevoked(true);
+        void supabase.removeAllChannels();
+        router.refresh();
+      })
+      .subscribe();
+    return () => { void supabase.removeChannel(revocation); };
+  }, [chatId, meId, router]);
+
   const send = useCallback(
     async (text: string) => {
       // Client-generated, so a retry of the same send is recognisable as the
@@ -119,6 +142,18 @@ export function ChatSurface({
     },
     [chatId, meId, people, addOptimistic],
   );
+
+  if (revoked) {
+    return (
+      <div className="rounded-lg border border-dashed border-border p-8 text-center">
+        <p className="text-sm">You are no longer a member of this chat.</p>
+        <p className="mt-2 text-xs text-muted">
+          Live updates have been stopped. Reloading will show what you can still
+          access — which, for this chat, is nothing.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-[calc(100vh-16rem)] min-h-[24rem] flex-col">
