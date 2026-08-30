@@ -264,6 +264,13 @@ internal view.
 
 ---
 
+## How memory works
+
+Storage, extraction, retrieval, contradiction handling, lifecycle, and what it
+deliberately does not solve: **[`docs/MEMORY.md`](docs/MEMORY.md)**.
+
+---
+
 ## Getting started
 
 Requires Node 22+, pnpm 9+, a Supabase project, and an Anthropic API key.

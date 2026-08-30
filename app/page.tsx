@@ -1,5 +1,7 @@
 import { redirect } from 'next/navigation';
 import { getActor } from '@/lib/db/server';
+import { isConfigured } from '@/config';
+import { SetupNotice } from './_components/setup-notice';
 import { DEV_USERS, devLoginEnabled } from '@/lib/auth/dev-users';
 import { SignIn } from './_components/sign-in';
 
@@ -10,6 +12,10 @@ export const metadata = {
 };
 
 export default async function Landing() {
+  // A fresh clone with no .env.local is ordinary, not exceptional. Say what is
+  // missing instead of throwing out of the env schema.
+  if (!isConfigured()) return <SetupNotice />;
+
   // Signed in already? Skip the marketing page.
   const actor = await getActor();
   if (actor) redirect('/chats');

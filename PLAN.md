@@ -18,7 +18,17 @@ PHASE 3  Tools, capability, polish, submit    ░░░░░░░░░░░�
 genuine Phase 1 miss — chat creation — plus four items that were in the fan-out
 but never in this plan. All are listed below rather than quietly absorbed.
 
-**Immediately next:** Phase 3 — the file tool first, since it is the cheapest one and it proves resource-level authorisation.
+**Phase 2 sanity check** found one real gap and two usability blockers, all now
+closed:
+
+| Found | Status |
+|---|---|
+| `user_clearances` had **no write path at all** — a fresh user held nothing, could not see or create a gated chat, and axis two was unreachable outside the seed script | ✅ `grant_clearance` / `revoke_clearance` (0012) + a People page. 16 assertions. |
+| The first user in an empty workspace could never be granted anything — nobody held a clearance to grant from | ✅ `claim_base_clearance()` hands out the level-0 rung only, which gates nothing |
+| `pnpm dev` on a fresh clone threw out of the env schema | ✅ renders a setup page instead |
+
+**Immediately next:** Phase 3 — the file tool first, since it is the cheapest and
+it proves resource-level authorisation.
 
 > Phase 2 shows progress already because the memory *schema* and its isolation
 > tests landed with the migrations. That was deliberate: the schema is one

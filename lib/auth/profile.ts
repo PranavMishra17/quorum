@@ -62,4 +62,16 @@ export async function ensureProfile(): Promise<void> {
       code: insertError.code,
     });
   }
+
+  // Give a brand-new user the BASE rung of the clearance ladder.
+  //
+  // Without this, a fresh workspace deadlocks: you cannot grant a clearance
+  // above your own, the first user holds none, so nobody could ever grant
+  // anything. Level 0 is safe to hand out because it gates nothing — an ungated
+  // chat already requires exactly level 0. It is a no-op for anyone who already
+  // holds a clearance, so it cannot be used to re-acquire something revoked.
+  const { error: claimError } = await supabase.rpc('claim_base_clearance');
+  if (claimError) {
+    console.error('[auth] base clearance claim failed', { userId: id, code: claimError.code });
+  }
 }

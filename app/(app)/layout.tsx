@@ -43,6 +43,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             Quorum
           </Link>
 
+          <Link href="/people" className="text-xs text-muted transition hover:text-foreground">
+            People
+          </Link>
           <Link href="/usage" className="text-xs text-muted transition hover:text-foreground">
             Usage
           </Link>

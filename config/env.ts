@@ -32,6 +32,21 @@ export type ClientEnv = z.infer<typeof clientSchema>;
 let clientCache: ClientEnv | null = null;
 
 /**
+ * Whether the public Supabase settings are present.
+ *
+ * Lets the app render a setup page instead of a stack trace when someone clones
+ * the repo and runs `pnpm dev` before provisioning anything. A missing
+ * configuration is an ordinary state on a fresh checkout, not an exception.
+ */
+export function isConfigured(): boolean {
+  return clientSchema.safeParse({
+    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:
+      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+  }).success;
+}
+
+/**
  * Lazy, not module-load, so that importing a threshold from `@/config` does not
  * drag an environment requirement along with it. Tests and `next build` should
  * not need production secrets to read a number out of `agent.ts`.
