@@ -5,6 +5,7 @@ import { createClient } from '@/lib/db/browser';
 import { namesFor } from '@/lib/db/profiles';
 import { ChatSurface, type UiMessage } from '../chat-surface';
 import { ClearanceStamp } from '../clearance';
+import { DemoStamp } from '../demo-stamp';
 import type { EventRow, CallRow } from '../event-trace';
 
 export interface RoomSummary {
@@ -13,6 +14,8 @@ export interface RoomSummary {
   name: string;
   clearance: { name: string; level: number } | null;
   role: 'admin' | 'member';
+  isDemo: boolean;
+  demoKind: string | null;
   members: { id: string; name: string; color: string }[];
   memberCount: number;
   lastMessage: { preview: string; at: string; fromAgent: boolean; fromName: string } | null;
@@ -123,6 +126,7 @@ function RoomGroup({
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-1.5">
                   <span className="min-w-0 flex-1 truncate text-sm">{r.name}</span>
+                  {r.isDemo && <DemoStamp />}
                   {r.unread > 0 && (
                     <span
                       className="label shrink-0 px-1.5 py-0.5"
@@ -230,9 +234,13 @@ function RoomPane({ room, meId }: { room: RoomSummary; meId: string }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col border border-border bg-surface">
-      <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-4 py-3">
+      <header className="flex shrink-0 flex-col gap-1 border-b border-border px-4 py-3">
+      <div className="flex flex-wrap items-center gap-3">
         <span className="min-w-0 flex-1">
-          <span className="block truncate font-display text-base font-semibold">{room.name}</span>
+          <span className="flex items-center gap-2">
+            <span className="min-w-0 truncate font-display text-base font-semibold">{room.name}</span>
+            {room.isDemo && <DemoStamp />}
+          </span>
           <span className="label text-muted">
             {room.type === 'agent'
               ? 'Just you and the agent'
@@ -241,7 +249,9 @@ function RoomPane({ room, meId }: { room: RoomSummary; meId: string }) {
                 }`}
           </span>
         </span>
-        <ClearanceStamp level={room.clearance?.level ?? 0} name={room.clearance?.name} />
+        {!room.isDemo && (
+          <ClearanceStamp level={room.clearance?.level ?? 0} name={room.clearance?.name} />
+        )}
         <a
           href={`/chat/${room.id}`}
           title="Open as a page"
@@ -249,6 +259,15 @@ function RoomPane({ room, meId }: { room: RoomSummary; meId: string }) {
         >
           Full page
         </a>
+      </div>
+      {room.isDemo && (
+        <p className="text-xs leading-relaxed text-muted">
+          Seeded for this demo — {room.demoKind === 'contract'
+            ? 'a contract and a colleague waiting to hear your review schedule.'
+            : 'a room your Priya conversation was never shared into.'}{' '}
+          Everything after the tap is a real conversation with the real agent.
+        </p>
+      )}
       </header>
 
       <div className="min-h-0 flex-1 px-4 pb-4">
@@ -272,6 +291,7 @@ function RoomPane({ room, meId }: { room: RoomSummary; meId: string }) {
             initialEvents={data.events}
             initialCalls={data.calls}
             containerClassName="flex h-full flex-col"
+            demoKind={room.demoKind}
           />
         )}
       </div>

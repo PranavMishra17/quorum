@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createClient } from '@/lib/db/server';
 import { ensureProfile } from '@/lib/auth/profile';
+import { ensureDemoWorld } from '@/lib/demo/seed';
 import { DEV_USERS, DEV_PASSWORD, devLoginEnabled } from '@/lib/auth/dev-users';
 
 /**
@@ -59,6 +60,7 @@ export async function GET(request: NextRequest) {
   }
 
   await ensureProfile();
+  await ensureDemoWorld();
 
   const url = request.nextUrl.clone();
   url.pathname = '/chats';

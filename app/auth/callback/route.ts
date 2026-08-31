@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createClient } from '@/lib/db/server';
 import { ensureProfile } from '@/lib/auth/profile';
+import { ensureDemoWorld } from '@/lib/demo/seed';
 
 /**
  * OAuth callback — exchanges the PKCE code for a session.
@@ -41,6 +42,7 @@ export async function GET(request: NextRequest) {
   // First sign-in has no profile row yet. Creating it here rather than lazily
   // on first read means every later query can assume it exists.
   await ensureProfile();
+  await ensureDemoWorld();
 
   // `next` is attacker-controllable, so only a same-origin path is honoured —
   // otherwise this is an open redirect hanging off the auth flow.

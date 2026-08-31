@@ -13,6 +13,7 @@
     "test:watch": "vitest",
     "test:rls": "supabase test db",
     "seed:dev": "node scripts/seed-dev.mjs",
+    "seed:demo-personas": "node scripts/seed-demo-personas.mjs",
     "verify:live": "node scripts/verify-live.mjs"
   },
   "dependencies": {

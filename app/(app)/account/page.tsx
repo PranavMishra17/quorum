@@ -3,6 +3,7 @@ import { createClient, requireActor } from '@/lib/db/server';
 import { ClearanceStamp } from '@/app/_components/clearance';
 import { adminModeEnabled } from '@/lib/auth/admin-mode';
 import { ClearanceControls, type DirectoryPerson, type Rung } from '@/app/_components/clearance-controls';
+import { ResetDemo } from '@/app/_components/reset-demo';
 import { CLEARANCES } from '@/config';
 
 export const metadata = { title: 'Account' };
@@ -41,7 +42,7 @@ export default async function AccountPage() {
       .from('chat_members')
       .select('role, status, chats(id, type, name, clearances:required_clearance_id(name, level))')
       .eq('user_id', actor.id),
-    supabase.from('profiles').select('id, display_name, color').order('display_name'),
+    supabase.from('profiles').select('id, display_name, color').eq('is_demo', false).order('display_name'),
     supabase.from('user_clearances').select('user_id, clearances(id, name, level)'),
     supabase.from('clearances').select('id, key, name, level').order('level'),
   ]);
@@ -202,6 +203,11 @@ export default async function AccountPage() {
           meId={actor.id}
           myTopLevel={topLevel ?? -1}
         />
+      </section>
+
+      <section className="border-t border-border pt-6">
+        <h2 className="label mb-2 text-foreground">Demo rooms</h2>
+        <ResetDemo />
       </section>
 
       {adminModeEnabled() && (

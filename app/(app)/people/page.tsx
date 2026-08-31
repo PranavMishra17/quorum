@@ -34,7 +34,7 @@ export default async function RoomsPage() {
 
   const { data: memberships } = await supabase
     .from('chat_members')
-    .select('chat_id, role, chats(id, type, name, clearances:required_clearance_id(name, level))')
+    .select('chat_id, role, chats(id, type, name, is_demo, demo_kind, clearances:required_clearance_id(name, level))')
     .eq('user_id', actor.id)
     .eq('status', 'member');
 
@@ -43,6 +43,7 @@ export default async function RoomsPage() {
     role: 'admin' | 'member';
     chats: {
       id: string; type: 'dm' | 'group' | 'agent'; name: string | null;
+      is_demo: boolean; demo_kind: string | null;
       clearances: { name: string; level: number } | null;
     } | null;
   }[]).filter((m) => m.chats);
@@ -108,6 +109,8 @@ export default async function RoomsPage() {
             : 'Untitled'),
       clearance: chat.clearances,
       role: r.role,
+      isDemo: chat.is_demo,
+      demoKind: chat.demo_kind,
       members: others,
       memberCount: roster.length,
       lastMessage: latest

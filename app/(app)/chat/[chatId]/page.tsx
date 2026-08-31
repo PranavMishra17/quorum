@@ -6,6 +6,7 @@ import { InternalView, type EventRow, type CallRow } from '@/app/_components/int
 import { Roster, type RosterMember } from '@/app/_components/roster';
 import { namesFor } from '@/lib/db/profiles';
 import { PopOutButton } from '@/app/_components/floating-panels/pop-out-button';
+import { DemoStamp } from '@/app/_components/demo-stamp';
 
 /**
  * A chat.
@@ -27,7 +28,7 @@ export default async function ChatPage({
 
   const { data: chat } = await supabase
     .from('chats')
-    .select('id, type, name, clearances:required_clearance_id(name, level)')
+    .select('id, type, name, is_demo, demo_kind, clearances:required_clearance_id(name, level)')
     .eq('id', chatId)
     .maybeSingle();
 
@@ -87,6 +88,7 @@ export default async function ChatPage({
 
   const chatRow = chat as unknown as {
     id: string; type: 'dm' | 'group' | 'agent'; name: string | null;
+    is_demo: boolean; demo_kind: string | null;
     clearances: { name: string; level: number } | null;
   };
 
@@ -149,9 +151,12 @@ export default async function ChatPage({
     <div>
       <div className="mb-4 flex items-baseline justify-between gap-4 border-b border-border pb-3">
         <div className="min-w-0">
-          <h1 className="truncate text-base font-semibold">
-            {chatRow.name ?? (chatRow.type === 'dm' ? 'Direct message' : 'Chat')}
-          </h1>
+          <span className="flex items-center gap-2">
+            <h1 className="truncate text-base font-semibold">
+              {chatRow.name ?? (chatRow.type === 'dm' ? 'Direct message' : 'Chat')}
+            </h1>
+            {chatRow.is_demo && <DemoStamp />}
+          </span>
           <p className="mt-0.5 truncate text-xs text-muted">
             {rosterMembers.filter((m) => m.status === 'member').map((m) => m.name).join(', ')}
           </p>
@@ -161,9 +166,11 @@ export default async function ChatPage({
             chatId={chatId}
             title={chatRow.name ?? (chatRow.type === 'dm' ? 'Direct message' : 'Chat')}
           />
-          <span className="bg-surface-raised px-2 py-0.5 text-[10px] uppercase tracking-wide text-foreground">
-            {chatRow.clearances?.name ?? 'General'}
-          </span>
+          {!chatRow.is_demo && (
+            <span className="bg-surface-raised px-2 py-0.5 text-[10px] uppercase tracking-wide text-foreground">
+              {chatRow.clearances?.name ?? 'General'}
+            </span>
+          )}
         </div>
       </div>
 
@@ -175,6 +182,7 @@ export default async function ChatPage({
           people={people}
           initialEvents={(events ?? []) as unknown as EventRow[]}
           initialCalls={(calls ?? []) as unknown as CallRow[]}
+          demoKind={chatRow.demo_kind}
         />
         <Roster
           chatId={chatId}

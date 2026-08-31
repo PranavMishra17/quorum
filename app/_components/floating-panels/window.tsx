@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/db/browser';
 import { namesFor } from '@/lib/db/profiles';
 import { ChatSurface, type UiMessage } from '../chat-surface';
+import { DemoStamp } from '../demo-stamp';
 import type { EventRow, CallRow } from '../event-trace';
 import { useFloatingPanels, type PanelState } from './context';
 
@@ -14,6 +15,8 @@ const MIN_H = 320;
 interface ChatData {
   type: 'dm' | 'group' | 'agent';
   name: string | null;
+  isDemo: boolean;
+  demoKind: string | null;
   amMember: boolean;
   meId: string;
   people: Record<string, { name: string; color: string }>;
@@ -46,7 +49,7 @@ export function FloatingPanelWindow({ panel }: { panel: PanelState }) {
 
       const [{ data: chat }, { data: members }, { data: messages }, { data: events }, { data: calls }] =
         await Promise.all([
-          supabase.from('chats').select('type, name').eq('id', panel.chatId).maybeSingle(),
+          supabase.from('chats').select('type, name, is_demo, demo_kind').eq('id', panel.chatId).maybeSingle(),
           supabase.from('chat_members').select('user_id, status').eq('chat_id', panel.chatId),
           supabase
             .from('messages')
@@ -91,6 +94,8 @@ export function FloatingPanelWindow({ panel }: { panel: PanelState }) {
       setData({
         type: (chat as { type: 'dm' | 'group' | 'agent' }).type,
         name: (chat as { name: string | null }).name,
+        isDemo: (chat as { is_demo: boolean }).is_demo,
+        demoKind: (chat as { demo_kind: string | null }).demo_kind,
         amMember,
         meId,
         people,
@@ -187,7 +192,10 @@ export function FloatingPanelWindow({ panel }: { panel: PanelState }) {
           panel.maximized ? '' : 'cursor-move'
         }`}
       >
-        <span className="label min-w-0 flex-1 truncate">{title}</span>
+        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+          <span className="label min-w-0 truncate">{title}</span>
+          {data !== 'loading' && data !== 'error' && data.isDemo && <DemoStamp />}
+        </span>
         <Link
           href={`/chat/${panel.chatId}`}
           title="Open as a page"
@@ -253,6 +261,7 @@ export function FloatingPanelWindow({ panel }: { panel: PanelState }) {
             initialEvents={data.events}
             initialCalls={data.calls}
             containerClassName="flex h-full flex-col"
+            demoKind={data.demoKind}
           />
         )}
       </div>

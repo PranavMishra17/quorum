@@ -125,7 +125,9 @@ export type Database = {
         Row: {
           created_at: string
           created_by: string
+          demo_kind: string | null
           id: string
+          is_demo: boolean
           name: string | null
           required_clearance_id: string | null
           type: Database["public"]["Enums"]["chat_type"]
@@ -133,7 +135,9 @@ export type Database = {
         Insert: {
           created_at?: string
           created_by: string
+          demo_kind?: string | null
           id?: string
+          is_demo?: boolean
           name?: string | null
           required_clearance_id?: string | null
           type: Database["public"]["Enums"]["chat_type"]
@@ -141,7 +145,9 @@ export type Database = {
         Update: {
           created_at?: string
           created_by?: string
+          demo_kind?: string | null
           id?: string
+          is_demo?: boolean
           name?: string | null
           required_clearance_id?: string | null
           type?: Database["public"]["Enums"]["chat_type"]
@@ -461,6 +467,7 @@ export type Database = {
           created_at: string
           display_name: string
           id: string
+          is_demo: boolean
         }
         Insert: {
           avatar_url?: string | null
@@ -468,6 +475,7 @@ export type Database = {
           created_at?: string
           display_name: string
           id: string
+          is_demo?: boolean
         }
         Update: {
           avatar_url?: string | null
@@ -475,6 +483,7 @@ export type Database = {
           created_at?: string
           display_name?: string
           id?: string
+          is_demo?: boolean
         }
         Relationships: []
       }
@@ -556,6 +565,14 @@ export type Database = {
         Returns: undefined
       }
       disconnect_connector: { Args: { p_provider: string }; Returns: undefined }
+      ensure_demo_world: {
+        Args: never
+        Returns: {
+          contract_chat_id: string
+          created: boolean
+          group_chat_id: string
+        }[]
+      }
       grant_clearance: {
         Args: { p_clearance_id: string; p_user_id: string }
         Returns: undefined
@@ -590,6 +607,7 @@ export type Database = {
           superseded_by: string
         }[]
       }
+      reset_demo_world: { Args: never; Returns: undefined }
       revoke_clearance: {
         Args: { p_clearance_id: string; p_user_id: string }
         Returns: undefined

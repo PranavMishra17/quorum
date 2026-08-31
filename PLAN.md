@@ -15,7 +15,7 @@ commit as the work it describes, so it is never stale. Detail lives in
 ```
 PHASE 1  MVP · submittable                    ████████████████  100%  DONE
 PHASE 2  Memory + agent depth + polish        ████████████████  100%  DONE
-PHASE 3  Tools, capability, polish, submit    ███████████████░  ~95%  ← WE ARE HERE
+PHASE 3  Tools, capability, polish, submit    ████████████████  ~98%  ← WE ARE HERE
 ```
 
 **Right now:** Phase 3. Every tool that was in scope is built. What remains is
@@ -371,24 +371,37 @@ demo and worse engineering:
 | The turn route declared `maxDuration = 60` while `TIERS.reason` budgeted 240s and research 180s — both budgets for a container four times larger than the one they ran in, and `after()` work counts toward that duration | One number, `PLATFORM.turnRouteMaxDurationSeconds`, asserted against every tier and against research |
 | `googleapis` was a dependency for four endpoints | Removed. Plain `fetch`: the request that goes out is the request you can read |
 
-### Demo layer — SCOPED, NOT STARTED
+### Demo layer — BUILT (migration 0020)
 
-Parked by request. A `demo` chat type, seeded per-user, sitting alongside real
-data rather than replacing it — so a first-time reviewer has something to click
-immediately instead of an empty workspace waiting on real signups.
+Landed leaner than scoped, deliberately: two rooms with ONE seed message
+between them, not four rooms with scripted back-and-forth. Every reply after
+that message is the real agent, on the real pipeline, with real telemetry —
+there is no standing mechanism anywhere in this codebase for posting a message
+on another user's behalf, and there deliberately never will be. See migration
+0020's own header for the rejected wider design and why it was rejected.
 
 | Piece | What it does |
 |---|---|
-| Seeded world | ~4 demo rooms per new user with backdated history: a contract review with a PDF attached, a group where the agent stayed silent, a DM where it learned a fact, and Q itself |
-| Scripted replay | Each room offers 3-4 suggested next messages. Clicking one posts your message for real; the OTHER human's reply is a hardcoded, backdated row. The agent's reply is NEVER scripted — it runs the real turn, real tools, real telemetry |
-| The memory demo, built in | One room teaches the agent a fact; another contains someone who was not there. Click through and watch `filtered_out: 1` in the live trace |
-| Visibly marked | A stamp on every demo room; a "Reset demo" action; never mixed into the real chat list |
+| Two personas, real accounts | "Priya" and "Sam" — genuine `auth.users` rows (every identity column in this schema is a real FK, so there is no lighter-weight fake person), created once via `pnpm seed:demo-personas`. `profiles.is_demo` excludes them from the Directory, New group, and clearance-granting lists at the application layer |
+| `ensure_demo_world()` | SECURITY DEFINER, no parameters, idempotent. Runs on every sign-in (after `ensureProfile()`). Creates a DM with Priya (one backdated seed message, a real PDF attached in a follow-up Node step since Storage cannot be written from SQL) and a group with Priya + Sam (deliberately NO seed message — its only job is to be a room Priya was in and Sam was not) |
+| The memory demo, for real | Tell the agent something in the Priya DM, then ask the same question in the Team Sync group. The withholding is not staged — the model call is real, and it genuinely does not know, because the fact was never retrieved into that room's context |
+| Suggestion chips | Canned strings shown above the composer in demo rooms. Tapping one sends it through the ORDINARY send path — same idempotency RPC, same gate, same everything. A chip is a keyboard shortcut, not a second code path |
+| Visibly marked, everywhere | A `DemoStamp` component, identical on the Rooms list, a chat header, the Workspace groups grid, and a floating panel — one component so the wording can never drift between surfaces |
+| Reset | `POST /api/demo/reset` deletes and rebuilds the caller's own two rooms. Takes no id; can only ever touch chats where the caller is a member and `is_demo = true` |
 
-Needs one design decision before building: scripted replies write
-`sender_type='user'` rows on behalf of a DIFFERENT user than the caller, which
-needs its own `SECURITY DEFINER` RPC restricted to `type = 'demo'` chats — a
-generic "post as anyone" function would be the exact kind of privilege
-escalation the rest of this project exists to prevent.
+Auto-join exclusion was the sharpest correctness risk: without it, migration
+0017's "join every new signup to ungated groups" trigger would pull EVERY new
+user into the FIRST user's demo group, since it is `type='group'` with no
+clearance requirement — destroying the entire "Sam was not in the room"
+premise. Migration 0020 redefines that trigger to exclude `is_demo` chats.
+Proven with a negative control: removing the exclusion makes exactly one test
+fail, and it is the one asserting a third signup stays out of an earlier
+user's demo group.
+
+24 assertions (18 SQL-level + suggestion/catalogue coverage), two negative
+controls, and 12/12 in a live browser against the real deployed database —
+including tapping a suggestion, watching the agent genuinely not know a fact
+in the wrong room, and a full reset-and-rebuild cycle.
 
 ### Submission
 
@@ -411,7 +424,7 @@ Two commands, proving two different things. Conflating them is the mistake
 
 | | Proves | Does NOT prove |
 |---|---|---|
-| `pnpm test` — 608 passing, 17 todo | The POLICIES, against a real Postgres 18.4, as an unprivileged role | That the application asks the right questions |
+| `pnpm test` — 626 passing, 17 todo | The POLICIES, against a real Postgres 18.4, as an unprivileged role | That the application asks the right questions |
 | `pnpm verify:live` — 20/20 | What a real signed-in user SEES in a browser, including full memory isolation with real model calls | The policies themselves — it sees only what the app chose to ask for |
 
 The distinction is not academic. `verify:live` found three bugs that every

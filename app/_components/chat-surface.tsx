@@ -7,6 +7,7 @@ import { MessageContent } from './message-content';
 import { TurnTrace } from './turn-trace';
 import type { EventRow, CallRow } from './event-trace';
 import { matchingCommands, SLASH_COMMANDS } from './slash-commands';
+import { suggestionsFor } from '@/lib/demo/suggestions';
 
 export interface UiMessage {
   id: string;
@@ -30,6 +31,7 @@ export function ChatSurface({
   initialEvents = [],
   initialCalls = [],
   containerClassName = 'flex h-[calc(100vh-16rem)] min-h-[24rem] flex-col',
+  demoKind = null,
 }: {
   chatId: string;
   meId: string;
@@ -43,6 +45,14 @@ export function ChatSurface({
   /** Overridable so the floating-panel host can fit this into a fixed-height
    *  window instead of the full-page layout's viewport-relative sizing. */
   containerClassName?: string;
+  /**
+   * `chats.demo_kind` (migration 0020), or null/undefined for an ordinary chat.
+   * Drives the one demo-specific thing ChatSurface does: composer suggestion
+   * chips. Centralised here rather than in each of the three places that render
+   * a ChatSurface (the full page, the Rooms pane, a floating panel) so all three
+   * get it for free instead of three separate wirings that could drift.
+   */
+  demoKind?: string | null;
 }) {
   const router = useRouter();
   const [revoked, setRevoked] = useState(false);
@@ -356,7 +366,7 @@ export function ChatSurface({
         })}
         <div ref={bottomRef} />
       </div>
-      <Composer chatId={chatId} onSend={send} people={people} meId={meId} />
+      <Composer chatId={chatId} onSend={send} people={people} meId={meId} demoKind={demoKind} />
     </div>
   );
 }
@@ -444,13 +454,15 @@ export function activeMention(value: string): string | null {
 }
 
 function Composer({
-  chatId, onSend, people, meId,
+  chatId, onSend, people, meId, demoKind,
 }: {
   chatId: string;
   onSend: (text: string) => Promise<void>;
   people: Record<string, { name: string; color: string }>;
   meId: string;
+  demoKind?: string | null;
 }) {
+  const suggestions = suggestionsFor(demoKind);
   const [value, setValue] = useState('');
   const [uploading, setUploading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -542,6 +554,33 @@ function Composer({
 
   return (
     <div className="mt-4">
+      {suggestions && suggestions.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {/*
+            Tapping SENDS immediately — through the same `onSend` the form
+            below uses, not by filling the input for the user to press Enter.
+            "Clicking one posts your message for real" is the entire design of
+            this feature: there is no intermediate state where a chip's text
+            sits in the box looking like it might still be scripted.
+          */}
+          {suggestions.map((text) => (
+            <button
+              key={text}
+              type="button"
+              onClick={() => void onSend(text)}
+              // NOT `.label` — that class uppercases and tracks its text,
+              // which is right for a short tag like "DEMO" but wrong here: this
+              // chip's text IS the message that gets sent verbatim, and
+              // shouting it back in small caps misrepresents what will
+              // actually appear in the transcript once tapped.
+              className="border border-dashed border-border-strong px-2 py-1 text-left text-xs transition hover:bg-surface-raised"
+              style={{ color: 'var(--c1)' }}
+            >
+              {text}
+            </button>
+          ))}
+        </div>
+      )}
       {notice && <p className="mb-2 text-xs text-muted">{notice}</p>}
       {/* The composer is the only place a user learns these exist, so both
           affordances are named here rather than in documentation nobody opens. */}

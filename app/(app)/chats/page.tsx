@@ -42,10 +42,10 @@ export default async function WorkspacePage() {
   ] = await Promise.all([
     supabase
       .from('chats')
-      .select('id, type, name, created_at, clearances:required_clearance_id(name, level)')
+      .select('id, type, name, created_at, is_demo, clearances:required_clearance_id(name, level)')
       .order('created_at', { ascending: false }),
     supabase.from('chat_members').select('chat_id, status, role').eq('user_id', actor.id),
-    supabase.from('profiles').select('id, display_name, color').order('display_name'),
+    supabase.from('profiles').select('id, display_name, color').eq('is_demo', false).order('display_name'),
     supabase.from('user_clearances').select('clearances(id, name, level)').eq('user_id', actor.id),
     supabase.from('user_clearances').select('user_id, clearances(name, level)'),
   ]);
@@ -55,6 +55,7 @@ export default async function WorkspacePage() {
     id: string;
     type: 'dm' | 'group' | 'agent';
     name: string | null;
+    is_demo: boolean;
     clearances: { name: string; level: number } | null;
   }[];
 
@@ -137,6 +138,7 @@ export default async function WorkspacePage() {
         memberCount: isMember ? (byChat.get(c.id) ?? []).length : null,
         status: isMember ? 'member' : m?.status === 'requested' ? 'requested' : 'discoverable',
         role: isMember ? (m?.role ?? 'member') : null,
+        isDemo: c.is_demo,
       };
     });
 

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ClearanceStamp, Redacted, RedactedLines, clearanceToken } from '../clearance';
+import { DemoStamp } from '../demo-stamp';
 import { useFloatingPanels } from '../floating-panels/context';
 
 export interface DirectoryPerson {
@@ -25,6 +26,7 @@ export interface GroupTile {
   memberCount: number | null;
   status: 'member' | 'requested' | 'discoverable';
   role: 'admin' | 'member' | null;
+  isDemo: boolean;
 }
 
 /**
@@ -402,8 +404,11 @@ function GroupCard({ group, onOpen }: { group: GroupTile; onOpen: () => void }) 
     <>
       <span className="flex items-start justify-between gap-2">
         <span className="min-w-0">
-          <span className="block truncate font-display text-base font-semibold leading-tight">
-            {group.name}
+          <span className="flex items-center gap-1.5">
+            <span className="block truncate font-display text-base font-semibold leading-tight">
+              {group.name}
+            </span>
+            {group.isDemo && <DemoStamp />}
           </span>
           <span className="label mt-1 block text-muted">
             {isMember
