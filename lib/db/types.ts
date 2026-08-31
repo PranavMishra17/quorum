@@ -468,6 +468,10 @@ export type Database = {
           display_name: string
           id: string
           is_demo: boolean
+          is_showcase: boolean
+          showcase_key: string | null
+          showcase_note: string | null
+          showcase_title: string | null
         }
         Insert: {
           avatar_url?: string | null
@@ -476,6 +480,10 @@ export type Database = {
           display_name: string
           id: string
           is_demo?: boolean
+          is_showcase?: boolean
+          showcase_key?: string | null
+          showcase_note?: string | null
+          showcase_title?: string | null
         }
         Update: {
           avatar_url?: string | null
@@ -484,6 +492,10 @@ export type Database = {
           display_name?: string
           id?: string
           is_demo?: boolean
+          is_showcase?: boolean
+          showcase_key?: string | null
+          showcase_note?: string | null
+          showcase_title?: string | null
         }
         Relationships: []
       }

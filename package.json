@@ -14,6 +14,7 @@
     "test:rls": "supabase test db",
     "seed:dev": "node scripts/seed-dev.mjs",
     "seed:demo-personas": "node scripts/seed-demo-personas.mjs",
+    "seed:showcase": "node scripts/seed-showcase-accounts.mjs",
     "verify:live": "node scripts/verify-live.mjs"
   },
   "dependencies": {

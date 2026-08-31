@@ -404,6 +404,27 @@ demo and worse engineering:
   the product actually does; the visual design (the redaction system, the
   two-room demonstration) is unchanged.
 
+### Showcase accounts — BUILT (migrations 0021, 0022)
+
+Two fixed, always-on, one-click sign-ins — "Jordan Reyes" and "Morgan
+Blake" — offered prominently on the landing page, distinct from the
+per-visitor demo world above. The demo world answers "what happens when
+you use it"; this answers "what does a real, lived-in world look like",
+for a reviewer who wants that in one click with zero setup.
+
+| Piece | What it does |
+|---|---|
+| Two real accounts, three rooms | Jordan (confidential clearance) and Morgan (internal) share a DM, plus a confidential "Meridian Deal Team" group (Jordan + a third seeded persona, "Casey Nolan" — never sign-in-able) and a general "Litigation Support" group (all three). Real backdated messages, not placeholder text. |
+| `write_memory_item()` seeded directly | 5 memory items across the two accounts and both clearance levels, so the withholding claim is demonstrable on arrival: ask the agent about the Meridian exclusivity date in Litigation Support (general, Morgan present) vs Meridian Deal Team (confidential, Morgan absent) — same account, same question, different answer, no live setup needed first. |
+| `/auth/showcase?user=jordan\|morgan` | The one deliberate exception to "no unauthenticated route hands out a session" — NOT gated by `NODE_ENV`, unlike `/auth/dev`. Closed instead by absence (`SHOWCASE_ACCOUNT_PASSWORD` unset → 404) and by scope: exactly two hardcoded accounts, ordinary RLS throughout, and every other member of every room they're in is itself a seeded identity. See the route's own header for the full argument. |
+| Anon-readable profile columns | `is_showcase`, `showcase_title`, `showcase_note` — a narrow `anon` SELECT policy (migration 0021) so the landing page can show who "Jordan" is before sign-in, without a second file touching the service-role key. |
+| A real bug, found and fixed (0022) | Building this surfaced that `join_default_groups()` excluded demo CHATS as join *targets* but never excluded a demo/showcase PROFILE as the new *member* — so creating Jordan/Morgan/Casey silently added all three (and, on this environment, the pre-existing Priya/Sam) to every real user's real ungated group. Fixed with a guard on the trigger plus a one-time cleanup delete, both in 0022. Proven with a negative control: reverting the guard makes exactly the new test fail (`tests/authorization/demo-world.test.ts`), and a paired test confirms real signups are still auto-joined as before. |
+
+628 assertions now (up from 626), plus a live curl-based check against the
+running dev server: anon landing page shows both cards, `/auth/showcase`
+signs in and redirects with `Cache-Control: private, no-store`, and Jordan's
+`/people` lists all three seeded rooms.
+
 ### Demo layer — BUILT (migration 0020)
 
 Landed leaner than scoped, deliberately: two rooms with ONE seed message

@@ -10,11 +10,12 @@ Postgres on Supabase.
 
 ![Quorum](docs/screenshots/title.png)
 
-> **Live at <https://quorum-rho.vercel.app>.** Sign in with Google, or — since
-> demonstrating authorisation needs several identities in the same room at
-> once — with one of the seeded accounts on the landing page when dev sign-in
-> is enabled. Verify the claims yourself with [`docs/VERIFY.md`](docs/VERIFY.md)
-> — every check states what to do, what to expect, and what failure looks like.
+> **Live at <https://quorum-rho.vercel.app>.** Sign in with Google, or click
+> straight into one of two standing showcase accounts on the landing page —
+> "Jordan Reyes" and "Morgan Blake" — each with several rooms, one gated by
+> clearance, and memory already built up, no setup required. Verify the
+> claims yourself with [`docs/VERIFY.md`](docs/VERIFY.md) — every check states
+> what to do, what to expect, and what failure looks like.
 >
 > **Status: built and deployed.** Auth, chats, the response gate, the turn
 > pipeline, memory retrieval and extraction, connectors, admin mode, and the
@@ -463,9 +464,13 @@ What shipped beyond the original Tier-1/2 scope: read-only Gmail and Calendar
 connectors (gated per-user, behind the same authorisation context every other
 agent read goes through), a self-service admin mode for demonstrating both
 authorisation axes from one browser, a subject-access memory page (what the
-agent has learned about *you*, specifically), and a seeded two-room demo world
-so the memory-withholding claim is something a reviewer can watch happen
-rather than take on faith.
+agent has learned about *you*, specifically), a seeded two-room demo world so
+the memory-withholding claim is something a reviewer can watch happen rather
+than take on faith, and two standing showcase accounts — "Jordan Reyes" and
+"Morgan Blake" — with a richer, pre-built world (several rooms, one gated by
+clearance, memory already written) offered directly on the landing page for
+anyone to try with no setup. Run `pnpm seed:showcase` to build them on your
+own project; see `.env.example` for `SHOWCASE_ACCOUNT_PASSWORD`.
 
 ## On AI tooling
 

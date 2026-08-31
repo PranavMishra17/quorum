@@ -4,6 +4,7 @@ import { isConfigured } from '@/config';
 import { SetupNotice } from './_components/setup-notice';
 import { DEV_USERS, devLoginEnabled } from '@/lib/auth/dev-users';
 import { SignIn } from './_components/sign-in';
+import { ShowcaseSignIn } from './_components/showcase-signin';
 import { Redacted } from './_components/clearance';
 
 export const metadata = {
@@ -74,6 +75,8 @@ export default async function Landing() {
         </div>
 
         <div className="lg:pt-4">
+          <ShowcaseSignIn />
+
           <div className="border border-border bg-surface p-6">
             <h2 className="label mb-1 text-foreground">Sign in</h2>
             <p className="mb-6 text-xs leading-relaxed text-muted">

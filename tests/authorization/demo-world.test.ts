@@ -202,6 +202,56 @@ describe('once personas exist', () => {
       const demoIds = new Set(demoChats.map((r) => r.id));
       expect(memberships.some((m) => demoIds.has((m as { chat_id: string }).chat_id))).toBe(false);
     });
+
+    // The inverse of the test above, and the bug 0022 actually fixes: 0020
+    // excluded a demo CHAT as a join *target*, but nothing excluded a demo
+    // profile as the new *member* — so creating a demo/showcase persona
+    // (scripts/seed-demo-personas.mjs, scripts/seed-showcase-accounts.mjs)
+    // silently added it to every real user's real ungated group. Found by
+    // querying chat_members for three freshly-created showcase accounts and
+    // seeing six unexpected rows, not by reading the trigger in advance.
+    it('a new DEMO profile does not land in an existing REAL ungated group', async () => {
+      const { rows: realGroup } = await admin.query(
+        `insert into public.chats (type, name, created_by) values ('group', 'Watercooler', $1) returning id`,
+        [u.Alice],
+      );
+      await admin.query(
+        `insert into public.chat_members (chat_id, user_id) values ($1, $2)`,
+        [realGroup[0].id, u.Alice],
+      );
+
+      const { rows: persona } = await admin.query(
+        `insert into auth.users (email) values ('jordan.demo.test@quorum.dev') returning id`,
+      );
+      await admin.query(
+        `insert into public.profiles (id, display_name, is_demo) values ($1, 'Jordan (test)', true)`,
+        [persona[0].id],
+      );
+
+      const { rows: memberships } = await admin.query(
+        `select chat_id from public.chat_members where user_id = $1`,
+        [persona[0].id],
+      );
+      expect(memberships.some((m) => m.chat_id === realGroup[0].id)).toBe(false);
+    });
+
+    it('a new REAL profile is still auto-joined as before — the exclusion is demo-only', async () => {
+      const { rows: realGroup } = await admin.query(
+        `insert into public.chats (type, name, created_by) values ('group', 'Watercooler', $1) returning id`,
+        [u.Alice],
+      );
+      await admin.query(
+        `insert into public.chat_members (chat_id, user_id) values ($1, $2)`,
+        [realGroup[0].id, u.Alice],
+      );
+
+      const bobMap = await seedUsers(admin, ['Bob']);
+      const { rows: memberships } = await admin.query(
+        `select chat_id from public.chat_members where user_id = $1`,
+        [bobMap.Bob],
+      );
+      expect(memberships.some((m) => m.chat_id === realGroup[0].id)).toBe(true);
+    });
   });
 
   describe('reset_demo_world()', () => {
