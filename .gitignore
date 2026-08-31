@@ -50,3 +50,6 @@ research/reports/*.draft.md
 
 # embedded postgres data dir (test harness)
 .pgdata/
+
+.vercel
+.env*
