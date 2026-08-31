@@ -49,6 +49,9 @@ export interface AssembleParams {
   chatName: string | null;
   chatType: string;
   memberNames: string[];
+  /** This room's own clearance requirement, named — null when ungated. Never
+   * the actor's own held level, never another chat's requirement. */
+  clearanceLabel?: { level: number; name: string } | null;
   history: Message[];
   /** Maps sender_id to a display name. */
   speakerNames: Map<string, string>;
@@ -76,6 +79,7 @@ export function assembleContext(params: AssembleParams): AssembledContext {
     chatName: params.chatName,
     chatType: params.chatType,
     memberNames: params.memberNames,
+    clearanceLabel: params.clearanceLabel ?? null,
     memory,
   });
 
@@ -85,6 +89,7 @@ export function assembleContext(params: AssembleParams): AssembledContext {
       chatName: params.chatName,
       chatType: params.chatType,
       memberNames: params.memberNames,
+      clearanceLabel: params.clearanceLabel ?? null,
       memory: [],
     });
     dropped.push('memory');

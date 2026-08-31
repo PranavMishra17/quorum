@@ -285,6 +285,28 @@ describe('once personas exist', () => {
       expect(rebuilt[0].created).toBe(true);
     });
 
+    // The bug 0023 fixes: a standing showcase room (scripts/seed-showcase-
+    // accounts.mjs) is `is_demo = true` — so the default-group auto-join
+    // trigger leaves it alone — but has `demo_kind = null`, unlike the
+    // per-visitor contract/isolation rooms. reset_demo_world() must tell the
+    // two apart, or a visitor signed in as a showcase account could delete
+    // the standing world by clicking "Reset demo" on their own account page.
+    it('CANNOT touch an is_demo room with no demo_kind — a standing showcase room', async () => {
+      const { rows: chat } = await admin.query(
+        `insert into public.chats (type, name, created_by, is_demo) values ('group','Litigation Support',$1,true) returning id`,
+        [u.Alice],
+      );
+      await admin.query(
+        `insert into public.chat_members (chat_id, user_id) values ($1,$2)`,
+        [chat[0].id, u.Alice],
+      );
+
+      await callAs(u.Alice, 'select public.reset_demo_world()');
+
+      const { rows: stillThere } = await admin.query(`select id from public.chats where id=$1`, [chat[0].id]);
+      expect(stillThere).toHaveLength(1);
+    });
+
     it('CANNOT touch a non-demo chat, even one the caller is a member of', async () => {
       const { rows: chat } = await admin.query(
         `insert into public.chats (type, name, created_by) values ('group','Real Group',$1) returning id`,

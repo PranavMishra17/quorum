@@ -118,7 +118,13 @@ async function ensureUser(u: ScenarioUser, runId: string): Promise<{ id: string;
   if (error) throw new Error(`could not create ${u.key}: ${error.message}`);
   const id = data.user.id;
 
-  await admin.from('profiles').upsert({ id, display_name: u.name, color: '#61afef' });
+  // is_demo excludes these from the Directory, New-group, and clearance
+  // lists, and — combined with the chats/page.tsx discovery filter — from
+  // showing up as "not a member" clutter in every real user's Workspace.
+  // Found the hard way: an earlier run without this flag left "alice"/"bob"
+  // scenario accounts auto-joined into real ungated groups and their throwaway
+  // rooms visible to every other user, indistinguishable from real people.
+  await admin.from('profiles').upsert({ id, display_name: u.name, color: '#61afef', is_demo: true });
 
   const client = createClient<Database>(BASE_URL!, ANON!, { auth: { persistSession: false } });
   const { error: signInError } = await client.auth.signInWithPassword({ email, password });
@@ -153,6 +159,10 @@ async function main() {
         name: c.name ?? null,
         created_by: creator,
         required_clearance_id: c.clearance ? clearance[c.clearance] : null,
+        // Same reason as the profile flag above: an ungated scenario group
+        // is otherwise a real, permanently-discoverable "not a member" tile
+        // in every other user's Workspace, forever.
+        is_demo: true,
       })
       .select('id')
       .single();

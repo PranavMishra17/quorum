@@ -85,6 +85,15 @@ export function Workspace({
   const [expanded, setExpanded] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
+  // Groups you're actually in first, requests pending next, everything you
+  // could join last — so the rooms that matter aren't scattered among ones
+  // you've never opened. Stable within each band: insertion order from the
+  // server, which is already alphabetised.
+  const sortedGroups = useMemo(() => {
+    const rank = (g: GroupTile) => (g.status === 'member' ? 0 : g.status === 'requested' ? 1 : 2);
+    return [...groups].sort((a, b) => rank(a) - rank(b));
+  }, [groups]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return people;
@@ -270,7 +279,7 @@ export function Workspace({
             </p>
           ) : (
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {groups.map((g) => (
+              {sortedGroups.map((g) => (
                 <GroupCard key={g.id} group={g} onOpen={() => open(g.id, g.name)} />
               ))}
             </div>
@@ -398,7 +407,13 @@ function PersonTile({
  */
 function GroupCard({ group, onOpen }: { group: GroupTile; onOpen: () => void }) {
   const isMember = group.status === 'member';
-  const accent = group.clearance ? clearanceToken(group.clearance.level) : 'var(--c0)';
+  // Colour is reserved for rooms you're actually in — clearance still governs
+  // the stamp's own colour there. A room you're not a member of recedes to
+  // grey regardless of its clearance, so the grid reads "mine" vs "not mine"
+  // at a glance instead of every tile competing on the same saturated colour.
+  const accent = isMember && group.clearance ? clearanceToken(group.clearance.level)
+    : isMember ? 'var(--c0)'
+    : 'var(--border-strong)';
 
   const inner = (
     <>
@@ -466,7 +481,7 @@ function GroupCard({ group, onOpen }: { group: GroupTile; onOpen: () => void }) 
 
   return (
     <div
-      className="flex min-h-[10rem] flex-col justify-between border border-l-2 border-dashed border-border bg-surface/40 p-4"
+      className="flex min-h-[10rem] flex-col justify-between border border-l-2 border-dashed border-border bg-surface/40 p-4 opacity-60 grayscale transition hover:opacity-100 hover:grayscale-0"
       style={{ borderLeftColor: accent }}
     >
       {inner}

@@ -114,6 +114,30 @@ export class ScopedAgentContext {
   }
 
   /**
+   * This chat's clearance floor, named — null when ungated.
+   *
+   * For the prompt, not the filter: `clearanceLevel()` above is what
+   * authorisation math runs on. This is purely so the agent can be told "this
+   * room requires Confidential" in words, and only that — nothing here is the
+   * ACTOR'S own held level, and nothing here is any OTHER chat's requirement.
+   * Both of those would be exactly the kind of cross-room fact this project
+   * exists to keep out of the model's context; a room's OWN requirement is not,
+   * because every member already sees it in the UI (the `ClearanceStamp` on the
+   * chat header) — telling the agent repeats something already visible to
+   * everyone here, rather than disclosing anything new.
+   */
+  async clearanceLabel(): Promise<{ level: number; name: string } | null> {
+    const { data, error } = await this.db
+      .from('chats')
+      .select('clearances:required_clearance_id(level, name)')
+      .eq('id', this.chatId)
+      .maybeSingle();
+    if (error) throw error;
+    const row = data as { clearances?: { level: number; name: string } | null } | null;
+    return row?.clearances ?? null;
+  }
+
+  /**
    * Re-verify that the actor still passes both axes.
    *
    * Call this before any privileged read whose result reaches the model. A

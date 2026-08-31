@@ -166,6 +166,12 @@ async function createRoom({ type, name, requiredClearanceKey, createdBy, members
       name: name ?? null,
       created_by: createdBy,
       required_clearance_id: requiredClearanceKey ? clearanceId[requiredClearanceKey] : null,
+      // Excludes these from the ordinary default-group auto-join (every new
+      // signup was otherwise silently added to "Litigation Support" — found
+      // from a real screenshot showing nine members on a room meant to hold
+      // three). `demo_kind` stays null, which is what keeps reset_demo_world()
+      // (migration 0023) from ever touching these on any visitor's behalf.
+      is_demo: true,
     })
     .select('id')
     .single();

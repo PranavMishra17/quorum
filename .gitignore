@@ -53,3 +53,4 @@ research/reports/*.draft.md
 
 .vercel
 .env*
+CLAUDE.md

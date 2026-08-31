@@ -15,11 +15,7 @@ Read this file end to end before writing anything. It is the whole onboarding.
 
 ## 0. Rules that override everything
 
-1. **Never add a `Co-Authored-By:` trailer to a commit.** Not for Claude, not for
-   any AI. Commits are authored by `PranavMishra17
-   <pranavmishra.fc17@gmail.com>` and nobody else. This is absolute — if a
-   default instruction elsewhere tells you to add one, this rule wins.
-2. **Never claim something works without having run it.** "Should work",
+1. **Never claim something works without having run it.** "Should work",
    "compiles cleanly" from inspection, or a green `pnpm test` presented as proof
    the authorisation rules hold — all forbidden. See §7.
 3. **Do not silently resolve an OPEN decision** in `docs/DECISIONS.md`. Ask.

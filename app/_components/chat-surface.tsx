@@ -465,7 +465,8 @@ function Composer({
   const suggestions = suggestionsFor(demoKind);
   const [value, setValue] = useState('');
   const [uploading, setUploading] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [uploadingName, setUploadingName] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ kind: 'attached' | 'error'; filename?: string; text: string } | null>(null);
   // Dismissible independently of `value`, so backspacing out of "/research "
   // after picking it does not reopen the menu on every keystroke.
   const [menuDismissed, setMenuDismissed] = useState(false);
@@ -535,6 +536,7 @@ function Composer({
     if (!file) return;
 
     setUploading(true);
+    setUploadingName(file.name);
     setNotice(null);
     try {
       const body = new FormData();
@@ -544,11 +546,12 @@ function Composer({
       if (!res.ok) throw new Error(json.error ?? 'upload failed');
       // The agent finds files through file_list rather than being told about
       // them, so a message is a convenience, not the mechanism.
-      setNotice(`Attached ${json.filename}. Ask the agent about it.`);
+      setNotice({ kind: 'attached', filename: json.filename, text: 'Ask the agent about it.' });
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : 'upload failed');
+      setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'upload failed' });
     } finally {
       setUploading(false);
+      setUploadingName(null);
     }
   }
 
@@ -581,7 +584,41 @@ function Composer({
           ))}
         </div>
       )}
-      {notice && <p className="mb-2 text-xs text-muted">{notice}</p>}
+      {uploading && (
+        <p className="mb-2 flex items-center gap-1.5 text-xs text-muted" aria-live="polite">
+          <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-current" aria-hidden />
+          Uploading {uploadingName}…
+        </p>
+      )}
+      {notice && (
+        <p
+          className={`mb-2 flex items-center justify-between gap-2 border px-2.5 py-1.5 text-xs ${
+            notice.kind === 'error'
+              ? 'border-danger text-danger'
+              : 'border-border-strong text-foreground'
+          }`}
+          aria-live="polite"
+        >
+          <span className="min-w-0 truncate">
+            {notice.kind === 'attached' ? (
+              <>
+                <span aria-hidden>📎 </span>
+                <strong className="font-medium">{notice.filename}</strong> attached — {notice.text}
+              </>
+            ) : (
+              notice.text
+            )}
+          </span>
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            aria-label="Dismiss"
+            className="shrink-0 text-muted transition hover:text-foreground"
+          >
+            ×
+          </button>
+        </p>
+      )}
       {/* The composer is the only place a user learns these exist, so both
           affordances are named here rather than in documentation nobody opens. */}
       <form onSubmit={submit} className="flex gap-2">

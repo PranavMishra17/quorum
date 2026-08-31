@@ -126,7 +126,17 @@ export default async function WorkspacePage() {
 
   // ---- groups ------------------------------------------------------------
   const groups: GroupTile[] = chatRows
-    .filter((c) => c.type === 'group')
+    .filter((c) => {
+      if (c.type !== 'group') return false;
+      // A per-user demo world's isolation group (migration 0020) is ungated on
+      // purpose, so RLS returns it to every authenticated user for discovery —
+      // correct for a real group, but it means every new signup's own demo
+      // room would otherwise pile up as a "not a member" tile in everyone
+      // else's workspace, forever. Only show a demo group here to its own
+      // members; Rooms is where they'd actually open it.
+      if (c.is_demo) return mine.get(c.id)?.status === 'member';
+      return true;
+    })
     .map((c) => {
       const m = mine.get(c.id);
       const isMember = m?.status === 'member';

@@ -8,6 +8,9 @@ export interface ReplyPromptParams {
   chatName: string | null;
   chatType: string;
   memberNames: string[];
+  /** This room's own clearance requirement — never the actor's held level,
+   * never another room's. See ScopedAgentContext.clearanceLabel(). */
+  clearanceLabel?: { level: number; name: string } | null;
   memory: MemoryLine[];
 }
 
@@ -59,9 +62,13 @@ export function replyPrompt(params: ReplyPromptParams): string {
     ? `You are in "${params.chatName}", a ${params.chatType} chat`
     : `You are in a ${params.chatType} chat`;
 
+  const clearance = params.clearanceLabel
+    ? ` This room requires ${params.clearanceLabel.name} clearance — everyone here holds it.`
+    : '';
+
   return `You are Quorum, an assistant present in every conversation in this workspace.
 
-${where} with ${params.memberNames.length} people: ${params.memberNames.join(', ')}.
+${where} with ${params.memberNames.length} people: ${params.memberNames.join(', ')}.${clearance}
 
 You have already decided that speaking is appropriate — that decision is made
 before you are called, so do not deliberate about whether to reply. Reply.

@@ -231,11 +231,12 @@ async function speak(
   ctx: ScopedAgentContext,
   messageId: string,
 ): Promise<{ messageId: string; session: ToolSession | null }> {
-  const [history, names, chat, memberIds] = await Promise.all([
+  const [history, names, chat, memberIds, clearanceLabel] = await Promise.all([
     ctx.recentMessages(60),
     ctx.speakerNames(),
     ctx.chatSummary(),
     ctx.activeMemberIds(),
+    ctx.clearanceLabel(),
   ]);
 
   const current = history.find((m) => m.id === messageId);
@@ -263,6 +264,7 @@ async function speak(
     chatName: chat.name,
     chatType: chat.type,
     memberNames: memberIds.map((id) => names.get(id) ?? 'Someone'),
+    clearanceLabel,
     history,
     speakerNames: names,
     memory,
