@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { clearanceToken } from './clearance';
 
 export interface Rung { id: string; key?: string; name: string; level: number }
 export interface DirectoryPerson {
@@ -72,6 +73,13 @@ export function ClearanceControls({
 
       {error && <p className="mb-3 text-xs text-danger">{error}</p>}
 
+      {grantable.length > 0 && (
+        <p className="mb-3 text-xs text-muted">
+          Click a rung to grant it; click a coloured one to revoke it. Dashed
+          rungs are above your own clearance and cannot be changed from here.
+        </p>
+      )}
+
       {grantable.length === 0 && (
         <p className="mb-3 border border-dashed border-border p-3 text-xs text-muted">
           You hold no clearance, so you cannot grant one. Someone who holds a
@@ -106,6 +114,11 @@ export function ClearanceControls({
 
                 if (!held && !canChange) return null;
 
+                // Coloured by the rung's own token when held, so a granted
+                // clearance reads through the same colour grammar as every
+                // ClearanceStamp elsewhere — a plain grey pill here would have
+                // been the one place "colour means clearance" stopped being true.
+                const token = clearanceToken(r.level);
                 return (
                   <button
                     key={r.id}
@@ -116,13 +129,15 @@ export function ClearanceControls({
                         ? held ? `Revoke ${r.name}` : `Grant ${r.name}`
                         : `${r.name} is above your own clearance`
                     }
-                    className={` px-2 py-0.5 text-[10px] uppercase tracking-wide transition ${
+                    style={held ? { color: token, borderColor: token } : undefined}
+                    className={`label border px-2 py-1 transition ${
                       held
-                        ? 'bg-surface-raised text-foreground hover:line-through'
-                        : 'border border-dashed border-border text-muted hover:border-border-strong hover:text-foreground'
-                    } disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:no-underline`}
+                        ? 'hover:opacity-60'
+                        : 'border-dashed border-border text-muted hover:border-border-strong hover:text-foreground'
+                    } disabled:cursor-not-allowed disabled:opacity-40`}
                   >
                     {r.name}
+                    {held && <span className="ml-1" aria-hidden>✓</span>}
                   </button>
                 );
               })}

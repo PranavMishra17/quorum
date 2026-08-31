@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import { createClient, requireActor } from '@/lib/db/server';
 import { googleConnectorConfigured, GOOGLE_SCOPES } from '@/lib/connectors/google';
-import { untypedDb } from '@/lib/connectors/rpc';
 import { Disconnect } from './disconnect';
 import { CAPABILITIES, CAPABILITY_GROUPS, type Capability } from '@/lib/agent/catalogue';
 
@@ -31,7 +30,7 @@ export default async function ConnectorsPage({
   const { status } = await searchParams;
   const supabase = await createClient();
 
-  const { data, error } = await untypedDb(supabase).rpc('connector_status');
+  const { data, error } = await supabase.rpc('connector_status');
   if (error) {
     // Surfaced rather than swallowed. A discarded error here would render as
     // "not connected" — the exact failure that made a user look like a
@@ -176,11 +175,83 @@ export default async function ConnectorsPage({
             Requested: {GOOGLE_SCOPES.map((s) => s.split('/').pop()).join(', ')}.
           </p>
         </div>
+
+        {configured && !google && <SetupChecklist />}
       </section>
 
       <Link href="/chats" className="inline-block text-xs underline underline-offset-4">
         Back to the workspace
       </Link>
+    </div>
+  );
+}
+
+/**
+ * What is left to do in GOOGLE'S CONSOLE, not in this codebase.
+ *
+ * `configured` only means our four environment variables are set — the code
+ * path builds a correct consent URL and can decrypt what comes back. It says
+ * nothing about whether Google's side will actually complete the exchange:
+ * the Gmail and Calendar APIs have to be individually enabled on the project,
+ * both scopes have to be added on the OAuth consent screen, this exact
+ * redirect URI has to be listed on the OAuth client, and — while the app is
+ * unpublished — the signed-in account has to be added as a test user. Every
+ * one of those is a `redirect_uri_mismatch` or an `access_denied` with no
+ * useful stack trace on our side, because the failure happens on Google's
+ * server before any of our code runs.
+ *
+ * So this is shown between "configured" and "connected": the gap where a
+ * developer is currently guessing which Console tab to open. See
+ * docs/EMAIL-SETUP.md for the full walkthrough this summarises.
+ */
+function SetupChecklist() {
+  return (
+    <div className="mt-4 border-t border-border pt-4">
+      <p className="label" style={{ color: 'var(--c2)' }}>
+        Before &ldquo;Connect Google&rdquo; will complete
+      </p>
+      <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted">
+        The environment variables are set, so the button above will start the
+        flow — but Google&apos;s side needs its own setup, done once per
+        project, in{' '}
+        <a
+          href="https://console.cloud.google.com/apis/credentials"
+          target="_blank"
+          rel="noopener noreferrer nofollow"
+          className="underline underline-offset-2 hover:text-foreground"
+        >
+          Google Cloud Console
+        </a>
+        :
+      </p>
+      <ol className="mt-2 list-decimal space-y-1 pl-5 text-xs leading-relaxed text-muted">
+        <li>
+          <strong className="text-foreground">APIs &amp; Services → Library</strong> — enable both the
+          Gmail API and the Google Calendar API.
+        </li>
+        <li>
+          <strong className="text-foreground">OAuth consent screen → Data access</strong> — add both
+          scopes: <code className="font-mono">gmail.readonly</code> and{' '}
+          <code className="font-mono">calendar.readonly</code>.
+        </li>
+        <li>
+          <strong className="text-foreground">Credentials → your OAuth client → Authorised redirect URIs</strong> —
+          add exactly:
+          <code className="mt-1 block break-all border border-border bg-surface-raised px-2 py-1 font-mono">
+            http://localhost:3000/api/connectors/google/callback
+          </code>
+          (and your deployed URL&apos;s equivalent, for production).
+        </li>
+        <li>
+          <strong className="text-foreground">OAuth consent screen → Audience → Test users</strong> — add the
+          Google account you intend to connect with. While the app is
+          unpublished, only listed accounts can complete the grant.
+        </li>
+      </ol>
+      <p className="mt-2 text-xs text-muted">
+        All four are one-time, per Google Cloud project. Full walkthrough:{' '}
+        <code className="font-mono">docs/EMAIL-SETUP.md</code>.
+      </p>
     </div>
   );
 }

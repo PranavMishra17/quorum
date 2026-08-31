@@ -49,6 +49,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               <NavLink href="/chats">Workspace</NavLink>
               <NavLink href="/people">Rooms</NavLink>
               <NavLink href="/connectors">Capabilities</NavLink>
+              <NavLink href="/memory">Memory</NavLink>
               <NavLink href="/usage">Usage</NavLink>
               {adminModeEnabled() && (
                 <Link

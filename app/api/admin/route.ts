@@ -1,7 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createClient, requireActor, NotAuthenticatedError } from '@/lib/db/server';
 import { adminModeEnabled } from '@/lib/auth/admin-mode';
-import { untypedDb } from '@/lib/connectors/rpc';
 
 /**
  * Admin mode actions — self-granting clearance, self-joining groups.
@@ -80,7 +79,15 @@ export async function POST(request: NextRequest) {
   const supabase = await createClient();
   const spec = RPC[action];
 
-  const { error } = await untypedDb(supabase).rpc(spec.fn, {
+  // The function name is chosen at runtime from a closed, validated set
+  // (ACTIONS above), so `rpc()`'s overloaded, literal-only signature cannot
+  // express it statically. The cast is narrow and local to this one call,
+  // unlike the blanket `untypedDb` shim this replaced — that shim existed only
+  // because the generated types had not caught up with a migration yet, which
+  // is no longer true after `supabase gen types` picked up 0016.
+  const { error } = await (
+    supabase.rpc as (fn: string, args: Record<string, unknown>) => ReturnType<typeof supabase.rpc>
+  )(spec.fn, {
     [spec.arg]: targetId,
     p_secret: secret,
   });

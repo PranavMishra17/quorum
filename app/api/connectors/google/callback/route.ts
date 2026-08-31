@@ -3,7 +3,6 @@ import { timingSafeEqual } from 'node:crypto';
 import { createClient, requireActor, NotAuthenticatedError } from '@/lib/db/server';
 import { exchangeCode, googleConfig, STATE_COOKIE } from '@/lib/connectors/google';
 import { sealToken } from '@/lib/connectors/crypto';
-import { untypedDb } from '@/lib/connectors/rpc';
 
 /**
  * Complete the Google connector grant.
@@ -74,7 +73,7 @@ export async function GET(request: NextRequest) {
   }
 
   const supabase = await createClient();
-  const { error } = await untypedDb(supabase).rpc('connect_google', {
+  const { error } = await supabase.rpc('connect_google', {
     p_refresh_token_encrypted: sealToken(grant.refreshToken),
     p_scopes: grant.scopes,
   });

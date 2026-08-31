@@ -322,7 +322,17 @@ export function ChatSurface({
 
   return (
     <div className={containerClassName}>
-      <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-1 py-2">
+      {/*
+        `min-h-0` is load-bearing, not tidying.
+
+        A flex item defaults to `min-height: auto`, which means it refuses to
+        shrink below its content. So `flex-1 overflow-y-auto` does NOT scroll
+        inside a flex column — the item grows to fit every message and pushes
+        its parent past whatever max-height the parent was given. That is why
+        the rooms page and the floating panel were both spilling down the page
+        instead of scrolling: the container was capped and the child ignored it.
+      */}
+      <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-1 py-2">
         {messages.length === 0 && (
           <p className="py-12 text-center text-sm text-muted">No messages yet.</p>
         )}
@@ -463,9 +473,12 @@ function Composer({
     const roster = Object.entries(people)
       .filter(([id]) => id !== meId)
       .map(([, p]) => ({ handle: p.name.split(' ')[0].toLowerCase(), label: p.name, hint: 'in this chat', color: p.color }));
+    // Only `q` is offered. `@quorum` and `@agent` still work — see
+    // GATE.mentionTokens — but listing three ways to say the same thing makes
+    // the menu look like it has three entries when it has one, and the reader
+    // has to read all three to discover that.
     return [
       { handle: 'q', label: 'Q', hint: 'the agent — makes it answer' },
-      { handle: 'quorum', label: 'Quorum', hint: 'the agent, long form' },
       ...roster,
     ];
   }, [people, meId]);

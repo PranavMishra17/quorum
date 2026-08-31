@@ -14,6 +14,30 @@ export type Database = {
   }
   public: {
     Tables: {
+      admin_mode_log: {
+        Row: {
+          action: string
+          created_at: string
+          id: string
+          target_id: string
+          user_id: string
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          id?: string
+          target_id: string
+          user_id: string
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          id?: string
+          target_id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       agent_events: {
         Row: {
           chat_id: string
@@ -153,6 +177,33 @@ export type Database = {
           key?: string
           level?: number
           name?: string
+        }
+        Relationships: []
+      }
+      connector_tokens: {
+        Row: {
+          connected_at: string
+          provider: string
+          refresh_token_encrypted: string
+          revoked_at: string | null
+          scopes: string[]
+          user_id: string
+        }
+        Insert: {
+          connected_at?: string
+          provider: string
+          refresh_token_encrypted: string
+          revoked_at?: string | null
+          scopes?: string[]
+          user_id: string
+        }
+        Update: {
+          connected_at?: string
+          provider?: string
+          refresh_token_encrypted?: string
+          revoked_at?: string | null
+          scopes?: string[]
+          user_id?: string
         }
         Relationships: []
       }
@@ -466,6 +517,19 @@ export type Database = {
         Returns: boolean
       }
       claim_base_clearance: { Args: never; Returns: undefined }
+      connect_google: {
+        Args: { p_refresh_token_encrypted: string; p_scopes: string[] }
+        Returns: undefined
+      }
+      connector_status: {
+        Args: never
+        Returns: {
+          connected_at: string
+          provider: string
+          revoked_at: string
+          scopes: string[]
+        }[]
+      }
       create_chat: {
         Args: {
           p_member_ids: string[]
@@ -475,6 +539,23 @@ export type Database = {
         }
         Returns: string
       }
+      dev_self_grant: {
+        Args: { p_clearance_id: string; p_secret: string }
+        Returns: undefined
+      }
+      dev_self_join: {
+        Args: { p_chat_id: string; p_secret: string }
+        Returns: undefined
+      }
+      dev_self_leave: {
+        Args: { p_chat_id: string; p_secret: string }
+        Returns: undefined
+      }
+      dev_self_revoke: {
+        Args: { p_clearance_id: string; p_secret: string }
+        Returns: undefined
+      }
+      disconnect_connector: { Args: { p_provider: string }; Returns: undefined }
       grant_clearance: {
         Args: { p_clearance_id: string; p_user_id: string }
         Returns: undefined
@@ -491,6 +572,22 @@ export type Database = {
           relevance: number
           source_type: Database["public"]["Enums"]["memory_source"]
           subject_user_id: string
+        }[]
+      }
+      my_memory: {
+        Args: never
+        Returns: {
+          audience_size: number
+          clearance_level: number
+          confidence: number
+          content: string
+          created_at: string
+          expires_at: string
+          id: string
+          origin_chat_id: string
+          source_type: Database["public"]["Enums"]["memory_source"]
+          status: Database["public"]["Enums"]["memory_status"]
+          superseded_by: string
         }[]
       }
       revoke_clearance: {

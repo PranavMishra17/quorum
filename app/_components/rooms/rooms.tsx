@@ -57,8 +57,11 @@ export function Rooms({ rooms, meId }: { rooms: RoomSummary[]; meId: string }) {
   }
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[17rem_1fr]">
-      <aside className="flex max-h-[calc(100vh-9rem)] flex-col border border-border bg-surface">
+    // Fixed height, not max-height: the two panes are a viewport-height app
+    // surface, and `max-h` lets a short list collapse while a long transcript
+    // still tries to grow. Both panes scroll internally instead.
+    <div className="grid h-[calc(100vh-10rem)] min-h-[30rem] gap-4 lg:grid-cols-[17rem_1fr]">
+      <aside className="flex min-h-0 flex-col border border-border bg-surface">
         <div className="border-b border-border p-2">
           <input
             value={filter}
@@ -75,7 +78,7 @@ export function Rooms({ rooms, meId }: { rooms: RoomSummary[]; meId: string }) {
         </div>
       </aside>
 
-      <section className="min-w-0">
+      <section className="min-h-0 min-w-0">
         {open ? <RoomPane key={open.id} room={open} meId={meId} /> : null}
       </section>
     </div>
@@ -226,7 +229,7 @@ function RoomPane({ room, meId }: { room: RoomSummary; meId: string }) {
   }, [room.id]);
 
   return (
-    <div className="flex max-h-[calc(100vh-9rem)] flex-col border border-border bg-surface">
+    <div className="flex h-full min-h-0 flex-col border border-border bg-surface">
       <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-4 py-3">
         <span className="min-w-0 flex-1">
           <span className="block truncate font-display text-base font-semibold">{room.name}</span>

@@ -15,7 +15,7 @@ commit as the work it describes, so it is never stale. Detail lives in
 ```
 PHASE 1  MVP · submittable                    ████████████████  100%  DONE
 PHASE 2  Memory + agent depth + polish        ████████████████  100%  DONE
-PHASE 3  Tools, capability, polish, submit    ███████████████░  ~92%  ← WE ARE HERE
+PHASE 3  Tools, capability, polish, submit    ███████████████░  ~95%  ← WE ARE HERE
 ```
 
 **Right now:** Phase 3. Every tool that was in scope is built. What remains is
@@ -306,6 +306,50 @@ the audit from the route into `agent_events`, a table with no client insert
 policy, where it failed silently and would have shipped claiming a trail that
 did not exist.
 
+### Second FE pass — memory subject-access, Gmail wired up, and the group-creation fix
+
+Six more items from a direct usability pass, plus one migration mistake corrected.
+
+- **The agent now answers to Q reliably**, and the `@` mention menu lists it
+  once instead of three ways to say the same thing (`@quorum`/`@agent`/`@q`
+  still all work — see the previous entry — the menu just does not advertise
+  all three).
+- **A real flex-layout bug, not a styling one.** The rooms page and floating
+  panels were spilling down the page instead of scrolling internally. Cause:
+  a flex item's default `min-height: auto` refuses to shrink below its
+  content, so `flex-1 overflow-y-auto` inside a capped-height flex column does
+  not scroll — it grows and pushes the cap. `min-h-0` on every scrolling
+  ancestor fixes it. Worth naming because it is exactly the kind of bug that
+  looks like a Tailwind class was forgotten and is actually a CSS mechanics
+  fact.
+- **Memory, as a page.** `public.my_memory()` (migration 0019) is the one
+  read path into `memory_items` that is not the agent's: a person may read
+  rows where THEY are the subject, and nothing else. It deliberately IGNORES
+  the surfacing rule — a fact learned about you in a room you have since left
+  is still shown, because "what does it know about me" and "what may it say in
+  this room" are different questions that disagree on purpose for the same
+  row. 21 assertions against real Postgres, including that an empty audience
+  does NOT blank the subject's own view (the mirror image of the T1 trap).
+- **Gmail/Calendar wired up locally**, and the redirect URI + encryption key
+  filled in. What is left is entirely on Google's side — enabling both APIs,
+  adding both scopes to the consent screen, listing the redirect URI, adding
+  a test user — and the Capabilities page now says so as a checklist rather
+  than leaving a developer to guess which Console tab to open next.
+- **Group creation is groups-only now.** It used to offer DM and solo-agent
+  chat types in the same form, which meant the first decision was "which of
+  three things am I making" for two of which a dedicated affordance (click a
+  person; the Q tile) already existed. Clearance is now a stamp picker instead
+  of a `<select>`, matching the one visual grammar the whole redesign runs on,
+  and selected people stay visible as removable chips instead of disappearing
+  into a scrolled checklist.
+- **A migration's own reasoning corrected in the next one.** 0017 auto-joined
+  new signups to ungated groups but declined to backfill existing accounts,
+  reasoning that it might rewrite `memory_audience` snapshots. That reasoning
+  was wrong, in the safe direction: snapshots are never rewritten, and a new
+  member simply falls outside every old one — the room forgets things for
+  them, which is the rule working, not a leak. 0018 backfills, and says which
+  of the two migrations was mistaken rather than silently reversing it.
+
 ### What each tool cost in capability
 
 Worth stating, because in every case the easy version would have been a better
@@ -326,6 +370,25 @@ demo and worse engineering:
 | `toolDefinition` described **every** input property as a string. Fine for three tools with one string input between them; wrong the moment one took an array. The model would have sent a string and had it rejected by the schema that had just described it — and the symptom is a model that merely *appears* not to use its tools well | `z.toJSONSchema` over the same object that validates the input, so the description and the enforcement cannot disagree |
 | The turn route declared `maxDuration = 60` while `TIERS.reason` budgeted 240s and research 180s — both budgets for a container four times larger than the one they ran in, and `after()` work counts toward that duration | One number, `PLATFORM.turnRouteMaxDurationSeconds`, asserted against every tier and against research |
 | `googleapis` was a dependency for four endpoints | Removed. Plain `fetch`: the request that goes out is the request you can read |
+
+### Demo layer — SCOPED, NOT STARTED
+
+Parked by request. A `demo` chat type, seeded per-user, sitting alongside real
+data rather than replacing it — so a first-time reviewer has something to click
+immediately instead of an empty workspace waiting on real signups.
+
+| Piece | What it does |
+|---|---|
+| Seeded world | ~4 demo rooms per new user with backdated history: a contract review with a PDF attached, a group where the agent stayed silent, a DM where it learned a fact, and Q itself |
+| Scripted replay | Each room offers 3-4 suggested next messages. Clicking one posts your message for real; the OTHER human's reply is a hardcoded, backdated row. The agent's reply is NEVER scripted — it runs the real turn, real tools, real telemetry |
+| The memory demo, built in | One room teaches the agent a fact; another contains someone who was not there. Click through and watch `filtered_out: 1` in the live trace |
+| Visibly marked | A stamp on every demo room; a "Reset demo" action; never mixed into the real chat list |
+
+Needs one design decision before building: scripted replies write
+`sender_type='user'` rows on behalf of a DIFFERENT user than the caller, which
+needs its own `SECURITY DEFINER` RPC restricted to `type = 'demo'` chats — a
+generic "post as anyone" function would be the exact kind of privilege
+escalation the rest of this project exists to prevent.
 
 ### Submission
 
@@ -348,7 +411,7 @@ Two commands, proving two different things. Conflating them is the mistake
 
 | | Proves | Does NOT prove |
 |---|---|---|
-| `pnpm test` — 553 passing, 17 todo | The POLICIES, against a real Postgres 18.4, as an unprivileged role | That the application asks the right questions |
+| `pnpm test` — 608 passing, 17 todo | The POLICIES, against a real Postgres 18.4, as an unprivileged role | That the application asks the right questions |
 | `pnpm verify:live` — 20/20 | What a real signed-in user SEES in a browser, including full memory isolation with real model calls | The policies themselves — it sees only what the app chose to ask for |
 
 The distinction is not academic. `verify:live` found three bugs that every

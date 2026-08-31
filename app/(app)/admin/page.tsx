@@ -3,7 +3,6 @@ import Link from 'next/link';
 import { createClient, requireActor } from '@/lib/db/server';
 import { adminModeEnabled } from '@/lib/auth/admin-mode';
 import { AdminControls, type AdminRung, type AdminGroup } from '@/app/_components/admin-controls';
-import { untypedDb } from '@/lib/connectors/rpc';
 
 export const metadata = { title: 'Admin mode' };
 
@@ -32,7 +31,7 @@ export default async function AdminPage() {
       supabase.from('user_clearances').select('clearance_id').eq('user_id', actor.id),
       supabase.from('chats').select('id, name, type').eq('type', 'group'),
       supabase.from('chat_members').select('chat_id, status').eq('user_id', actor.id),
-      untypedDb(supabase)
+      supabase
         .from('admin_mode_log')
         .select('id, action, target_id, created_at')
         .order('created_at', { ascending: false })
