@@ -29,7 +29,7 @@ export function FloatingPanelHost() {
             <button
               key={p.chatId}
               onClick={() => toggleMinimize(p.chatId)}
-              className="max-w-[10rem] truncate rounded-full border border-border bg-surface-raised px-3 py-1.5 text-xs shadow transition hover:border-accent"
+              className="max-w-[10rem] truncate rounded-full border border-border bg-surface-raised px-3 py-1.5 text-xs shadow transition hover:border-border-strong"
               title={`Restore ${p.title}`}
             >
               {p.title}

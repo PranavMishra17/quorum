@@ -92,7 +92,7 @@ export default async function ChatPage({
 
   if (!amMember) {
     return (
-      <div className="mx-auto max-w-lg rounded-lg border border-dashed border-border p-8 text-center">
+      <div className="mx-auto max-w-lg border border-dashed border-border p-8 text-center">
         <h1 className="text-sm font-medium">
           {chatRow.name ?? 'This chat'}
         </h1>
@@ -101,7 +101,7 @@ export default async function ChatPage({
           You can see that it exists because you meet its clearance level. That
           is all discovery grants — no messages, no roster, no files.
         </p>
-        <Link href="/chats" className="mt-6 inline-block text-xs text-accent underline">
+        <Link href="/chats" className="mt-6 inline-block text-xs text-foreground underline">
           Back to chats
         </Link>
       </div>
@@ -161,7 +161,7 @@ export default async function ChatPage({
             chatId={chatId}
             title={chatRow.name ?? (chatRow.type === 'dm' ? 'Direct message' : 'Chat')}
           />
-          <span className="rounded bg-accent-soft px-2 py-0.5 text-[10px] uppercase tracking-wide text-accent">
+          <span className="bg-surface-raised px-2 py-0.5 text-[10px] uppercase tracking-wide text-foreground">
             {chatRow.clearances?.name ?? 'General'}
           </span>
         </div>

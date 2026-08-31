@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/db/browser';
-import { untypedRpc } from '@/lib/connectors/rpc';
+import { untypedDb } from '@/lib/connectors/rpc';
 
 /**
  * Disconnect the Google connector.
@@ -31,7 +31,7 @@ export function Disconnect() {
     start(async () => {
       setFailed(false);
       const supabase = createClient();
-      const { error } = await untypedRpc(supabase).rpc('disconnect_connector', {
+      const { error } = await untypedDb(supabase).rpc('disconnect_connector', {
         p_provider: 'google',
       });
       if (error) {

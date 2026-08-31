@@ -75,7 +75,7 @@ export function NewChat({
     return (
       <button
         onClick={() => setOpen(true)}
-        className="rounded-lg border border-border bg-surface-raised px-3 py-1.5 text-xs transition hover:border-accent"
+        className="border border-border bg-surface-raised px-3 py-1.5 text-xs transition hover:border-border-strong"
       >
         New chat
       </button>
@@ -85,7 +85,7 @@ export function NewChat({
   return (
     <form
       onSubmit={submit}
-      className="w-full rounded-lg border border-border bg-surface p-4"
+      className="w-full border border-border bg-surface p-4"
     >
       <div className="mb-4 flex gap-1">
         {(['group', 'dm', 'agent'] as const).map((t) => (
@@ -93,8 +93,8 @@ export function NewChat({
             key={t}
             type="button"
             onClick={() => { setType(t); setSelected(new Set()); }}
-            className={`rounded px-3 py-1.5 text-xs transition ${
-              type === t ? 'bg-accent-soft text-accent' : 'text-muted hover:text-foreground'
+            className={` px-3 py-1.5 text-xs transition ${
+              type === t ? 'bg-surface-raised text-foreground' : 'text-muted hover:text-foreground'
             }`}
           >
             {t === 'dm' ? 'Direct message' : t === 'agent' ? 'Just me and Quorum' : 'Group'}
@@ -107,7 +107,7 @@ export function NewChat({
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder={type === 'agent' ? 'Name (optional)' : 'Group name'}
-          className="mb-3 w-full rounded border border-border bg-surface-raised px-3 py-2 text-sm outline-none focus:border-accent"
+          className="mb-3 w-full border border-border bg-surface-raised px-3 py-2 text-sm outline-none focus:border-border-strong"
         />
       )}
 
@@ -120,7 +120,7 @@ export function NewChat({
           <select
             value={clearanceId}
             onChange={(e) => setClearanceId(e.target.value)}
-            className="w-full rounded border border-border bg-surface-raised px-3 py-2 text-sm outline-none focus:border-accent"
+            className="w-full border border-border bg-surface-raised px-3 py-2 text-sm outline-none focus:border-border-strong"
           >
             <option value="">No clearance required</option>
             {clearances.map((c) => (
@@ -138,7 +138,7 @@ export function NewChat({
           <ul className="max-h-48 space-y-1 overflow-y-auto">
             {people.map((p) => (
               <li key={p.id}>
-                <label className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-surface-raised">
+                <label className="flex cursor-pointer items-center gap-2 px-2 py-1.5 text-sm hover:bg-surface-raised">
                   <input
                     type={type === 'dm' ? 'radio' : 'checkbox'}
                     name="participants"
@@ -166,7 +166,7 @@ export function NewChat({
         <button
           type="submit"
           disabled={busy}
-          className="rounded border border-border bg-surface-raised px-3 py-1.5 text-xs transition hover:border-accent disabled:opacity-50"
+          className="border border-border bg-surface-raised px-3 py-1.5 text-xs transition hover:border-border-strong disabled:opacity-50"
         >
           {busy ? 'Creating…' : 'Create'}
         </button>

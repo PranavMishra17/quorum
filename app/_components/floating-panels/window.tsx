@@ -30,7 +30,7 @@ interface ChatData {
  * instead. Same tables, same RLS, same result for the same user.
  */
 export function FloatingPanelWindow({ panel }: { panel: PanelState }) {
-  const { close, focus, toggleMinimize, update } = useFloatingPanels();
+  const { close, focus, toggleMinimize, toggleMaximize, update } = useFloatingPanels();
   const [data, setData] = useState<ChatData | 'loading' | 'error'>('loading');
   const dragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
   const resizeRef = useRef<{ startX: number; startY: number; originW: number; originH: number } | null>(null);
@@ -109,7 +109,12 @@ export function FloatingPanelWindow({ panel }: { panel: PanelState }) {
       });
     }
 
-    void load();
+    // A throw inside load() would otherwise leave the panel on "Loading…"
+    // forever, with nothing in the console to say why.
+    void load().catch((err) => {
+      console.error('[panel] could not load chat', panel.chatId, err);
+      if (!cancelled) setData('error');
+    });
     return () => { cancelled = true; };
   }, [panel.chatId]);
 
@@ -160,38 +165,58 @@ export function FloatingPanelWindow({ panel }: { panel: PanelState }) {
       ? data.name ?? (data.type === 'dm' ? 'Direct message' : 'Chat')
       : panel.title;
 
+  // Maximized panels are laid out by the viewport, not by their stored
+  // geometry — which is kept untouched so restoring returns the panel to where
+  // the user last put it rather than to the default cascade position.
+  const geometry: React.CSSProperties = panel.maximized
+    ? { inset: '0.75rem', zIndex: panel.z }
+    : { left: panel.x, top: panel.y, width: panel.w, height: panel.h, zIndex: panel.z };
+
   return (
     <div
-      className="pointer-events-auto absolute flex flex-col overflow-hidden rounded-lg border border-border bg-background shadow-2xl"
-      style={{ left: panel.x, top: panel.y, width: panel.w, height: panel.h, zIndex: panel.z }}
+      className="pointer-events-auto absolute flex flex-col overflow-hidden border border-border-strong bg-background shadow-2xl"
+      style={geometry}
       onPointerDown={() => focus(panel.chatId)}
     >
       <div
-        onPointerDown={onHeaderPointerDown}
-        onPointerMove={onHeaderPointerMove}
+        onPointerDown={panel.maximized ? undefined : onHeaderPointerDown}
+        onPointerMove={panel.maximized ? undefined : onHeaderPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
-        className="flex shrink-0 cursor-move items-center gap-2 border-b border-border bg-surface-raised px-3 py-2"
+        className={`flex shrink-0 items-center gap-2 border-b border-border bg-surface-raised px-3 py-2 ${
+          panel.maximized ? '' : 'cursor-move'
+        }`}
       >
-        <span className="min-w-0 flex-1 truncate text-xs font-medium">{title}</span>
+        <span className="label min-w-0 flex-1 truncate">{title}</span>
         <Link
           href={`/chat/${panel.chatId}`}
-          title="Open full view"
-          className="rounded px-1 text-xs text-muted transition hover:text-foreground"
+          title="Open as a page"
+          aria-label="Open this chat as a full page"
+          className="px-1 text-xs text-muted transition hover:text-foreground"
         >
           ⤢
         </Link>
         <button
+          onClick={() => toggleMaximize(panel.chatId)}
+          title={panel.maximized ? 'Restore' : 'Full screen'}
+          aria-label={panel.maximized ? 'Restore panel' : 'Expand panel to full screen'}
+          className="px-1 text-xs text-muted transition hover:text-foreground"
+        >
+          {panel.maximized ? '❐' : '▢'}
+        </button>
+        <button
           onClick={() => toggleMinimize(panel.chatId)}
           title="Minimize"
-          className="rounded px-1 text-xs text-muted transition hover:text-foreground"
+          aria-label="Minimize panel"
+          className="px-1 text-xs text-muted transition hover:text-foreground"
         >
           −
         </button>
         <button
           onClick={() => close(panel.chatId)}
           title="Close"
-          className="rounded px-1 text-xs text-muted transition hover:text-danger"
+          aria-label="Close panel"
+          className="px-1 text-xs text-muted transition hover:text-foreground"
         >
           ×
         </button>
@@ -199,7 +224,15 @@ export function FloatingPanelWindow({ panel }: { panel: PanelState }) {
 
       <div className="min-h-0 flex-1">
         {data === 'loading' && (
-          <p className="p-4 text-xs text-muted">Loading…</p>
+          // A skeleton in the shape of the transcript, not the word "Loading".
+          // Opening a DM for the first time also creates it, which takes a
+          // moment, and an empty box for two seconds reads as a broken panel.
+          <div className="flex h-full flex-col justify-end gap-3 p-4" aria-busy="true">
+            <span className="sr-only">Opening conversation</span>
+            <span className="h-3 w-2/5 animate-pulse bg-surface-raised" />
+            <span className="h-3 w-3/5 animate-pulse self-end bg-surface-raised" />
+            <span className="h-3 w-1/3 animate-pulse bg-surface-raised" />
+          </div>
         )}
         {data === 'error' && (
           <p className="p-4 text-xs text-muted">This chat could not be opened.</p>
@@ -220,6 +253,8 @@ export function FloatingPanelWindow({ panel }: { panel: PanelState }) {
         )}
       </div>
 
+      {/* No resize grip while maximized — the viewport is setting the size. */}
+      {!panel.maximized && (
       <div
         onPointerDown={onResizePointerDown}
         onPointerMove={onResizePointerMove}
@@ -229,9 +264,10 @@ export function FloatingPanelWindow({ panel }: { panel: PanelState }) {
         className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize"
         style={{
           background:
-            'linear-gradient(135deg, transparent 0 50%, var(--border) 50% 60%, transparent 60% 70%, var(--border) 70% 80%, transparent 80%)',
+            'linear-gradient(135deg, transparent 0 50%, var(--border-strong) 50% 60%, transparent 60% 70%, var(--border-strong) 70% 80%, transparent 80%)',
         }}
       />
+      )}
     </div>
   );
 }

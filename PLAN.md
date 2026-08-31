@@ -15,7 +15,7 @@ commit as the work it describes, so it is never stale. Detail lives in
 ```
 PHASE 1  MVP · submittable                    ████████████████  100%  DONE
 PHASE 2  Memory + agent depth + polish        ████████████████  100%  DONE
-PHASE 3  Tools, capability, polish, submit    ██████████████░░  ~85%  ← WE ARE HERE
+PHASE 3  Tools, capability, polish, submit    ███████████████░  ~92%  ← WE ARE HERE
 ```
 
 **Right now:** Phase 3. Every tool that was in scope is built. What remains is
@@ -212,7 +212,8 @@ not work.
 | ✅ | 8 | **Research turn** — bounded, multi-step, user-invoked (`/research`) | 24 assertions, several of them source-level checks that the second turn type did not quietly drop a control |
 | ✅ | — | Cost/token dashboard | shipped in Phase 2 |
 | ✅ | — | Internal view renders tool and research events | a blocked exfiltration attempt is now one readable line, not raw JSON |
-| ⬜ | 9 | Space view — force-directed, **SVG** (D-025) | first to go |
+| ✅ | — | **Front-end rebuild** — the redaction identity, workspace home, directory, account and admin pages | see below |
+| ⬜ | 9 | Space view — force-directed, **SVG** (D-025) | first to go — the workspace grid now does its job |
 | ✅ | 10 | **Floating chat panels** — pop a chat out into a draggable, resizable window; minimize to a dock; multiple at once, capped at 4 | scoped as decorative from the start; session-only via `sessionStorage`, no durable layout |
 
 ### The FE functional pass — inline telemetry, floating panels, and what running the app found
@@ -252,6 +253,58 @@ at 4 concurrent panels (each holds its own Realtime subscriptions).
 | `cannot add postgres_changes callbacks ... after subscribe()` — a real Supabase Realtime race against Next dev's double-invoked effects. The second mount's `.channel(topic)` call, issued before the first mount's async `removeChannel()` leave had resolved, got handed back the ALREADY-SUBSCRIBED first instance instead of a fresh one. Crashed the chat page outright the moment a message was sent | Every Realtime topic now carries a random suffix per effect invocation, so two overlapping mounts can never collide on the same topic. Applied to all four subscription sites (`chat:`, `membership:`, `events:`, `turn:`) |
 | The inline trace's cost/token line was always blank — `TurnTrace` was never given `llm_calls` rows to join against, only `agent_events` | Threaded `initialCalls` through `ChatSurface` → `MessageRow` → `TurnTrace`, from both the server-rendered chat page and the floating panel's client-side loader |
 | The slash-command popup rendered **behind** an open floating panel — the panel host sits at `z-40`, the popup had no explicit z-index | `z-50` on the popup |
+
+### The front-end rebuild — the redaction identity
+
+The UI was a generic dark dashboard that could have belonged to any product. It
+now has one idea, and the idea is the thesis.
+
+**Colour means clearance, and nothing else.** Four hues exist — the four rungs
+of the ladder — so a colour anywhere on screen answers exactly one question. No
+primary blue, no accent links: primary actions invert to ink-on-paper instead.
+The single exception is a person's own identity colour, on their avatar and
+their name, because people are not a sensitivity level.
+
+**The signature is `--ink`** — the only pure black in the palette, used for
+exactly two things: the Q tile, and a redaction bar. Because nothing else is
+that black, "you cannot see this" reads without a label.
+
+**The redaction is honest.** `<Redacted>` takes a WIDTH, not content — there is
+deliberately no way to pass it something to hide, because every CSS mechanism
+for hiding text still ships that text to view-source, the clipboard and a screen
+reader. For a product claiming unauthorised content never reaches the client, a
+redaction you could select and copy would be the worst possible bug. The server
+never sends the names; the bar draws the hole they left. Asserted by the live
+driver against the page's own HTML.
+
+What that produces: a group you are cleared for but not in shows its NAME (so a
+join request is possible at all) with its roster as redaction bars. Same tile,
+same size, same place in the grid — the difference is not that it matters less,
+it is that it is withheld. A group above your clearance is not there at all: not
+greyed, not locked, not counted, because a count leaks the fact the rule
+protects (D-027).
+
+| Built | Notes |
+|---|---|
+| Workspace home | Search hero, Q as a two-column ink tile inside the people grid — the agent on the same footing as everyone else, not a bolted-on "Ask the AI" panel. `q` opens it, `/` focuses search |
+| Directory + click-to-DM | `POST /api/dm` is find-then-create. Without the find, clicking twice makes a SECOND DM with the same person — and a memory learned in one is authorised in the other, so "our conversation" silently splits across two rooms |
+| Groups grid | Member tiles list people; discoverable tiles redact them; join requests inline |
+| Account page | The whole ladder, held and unheld, because "what am I missing" is the useful question. It does not say what the missing rungs would reveal — that would be the disclosure D-027 prevents |
+| Admin mode | Dev-only, **three independent gates**, audited. See below |
+| Floating panels | Full-screen toggle, drag, resize, minimise dock |
+| Message styling | Agent right in ink-edged monochrome, people left in their own colour — two axes of difference, so it survives a glance and a colour-blind reader |
+
+**Admin mode is gated in the database, not just the app.** An env-var check in a
+route handler would have left a permanent escalation RPC in production, callable
+by anyone holding the publishable key — which ships in the browser bundle. So:
+the app requires non-production plus an explicit flag; the route holds a secret
+the browser never sees; and the SQL refuses unless `private.admin_mode_secret`
+holds a matching row, a table migration 0016 creates EMPTY. Pushing it to
+production leaves admin mode dead on arrival. Every action writes its own audit
+row from inside the function, so it cannot be skipped — the first draft wrote
+the audit from the route into `agent_events`, a table with no client insert
+policy, where it failed silently and would have shipped claiming a trail that
+did not exist.
 
 ### What each tool cost in capability
 
@@ -295,7 +348,7 @@ Two commands, proving two different things. Conflating them is the mistake
 
 | | Proves | Does NOT prove |
 |---|---|---|
-| `pnpm test` — 533 passing, 17 todo | The POLICIES, against a real Postgres 18.4, as an unprivileged role | That the application asks the right questions |
+| `pnpm test` — 553 passing, 17 todo | The POLICIES, against a real Postgres 18.4, as an unprivileged role | That the application asks the right questions |
 | `pnpm verify:live` — 20/20 | What a real signed-in user SEES in a browser, including full memory isolation with real model calls | The policies themselves — it sees only what the app chose to ask for |
 
 The distinction is not academic. `verify:live` found three bugs that every

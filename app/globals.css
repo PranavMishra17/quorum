@@ -1,35 +1,93 @@
 @import "tailwindcss";
 
 /*
- * Dark-first. The product is a workspace people sit in for hours, and the agent
- * needs a monochrome treatment that reads as clearly "not a person" — which is
- * easier to hold against a dark ground than a light one.
+ * ===========================================================================
+ * QUORUM — the redaction system
+ * ===========================================================================
+ *
+ * THE ONE RULE: colour means clearance. Nothing else in the chrome is
+ * coloured — not links, not buttons, not focus, not state. Four hues exist and
+ * they are the four rungs of the clearance ladder, so a colour anywhere on
+ * screen answers exactly one question: how sensitive is this. The moment a
+ * "primary blue" button exists, that stops being true, so there isn't one;
+ * primary actions invert to ink-on-paper instead.
+ *
+ * The exception, deliberately: a person's own identity colour, which lives on
+ * their avatar chip and their name in a transcript and nowhere else. People are
+ * not a sensitivity level, so they are not on the scale.
+ *
+ * THE SIGNATURE: --ink. The only pure black (or, in light mode, the only pure
+ * black on white) in the entire palette. It is used for exactly two things —
+ * the Q tile, and a redaction bar over content the viewer is not cleared for.
+ * Because nothing else is that black, "you cannot see this" reads instantly and
+ * without a label. It is also honest: a redaction bar contains no text in the
+ * DOM. The server never sent it.
+ *
+ * Light mode is not an afterthought here. A redacted document is black bars on
+ * white paper, so the light theme is arguably the more literal of the two.
  */
+
 :root {
-  --background: #0c0e13;
-  --surface: #14171f;
-  --surface-raised: #1b1f2a;
-  --border: #262b38;
-  --foreground: #e8eaf0;
-  --muted: #8b93a7;
-  --accent: #7c8cf8;
-  --accent-soft: #7c8cf822;
-  --agent: #9aa3b8;
-  --danger: #e06c75;
+  color-scheme: dark;
+
+  --background: #0b0b0d;
+  --surface: #141417;
+  --surface-raised: #1c1c21;
+  --border: #2b2b31;
+  --border-strong: #3d3d45;
+  --foreground: #ececed;
+  --muted: #83838f;
+
+  /* The signature. Never used for anything but Q and redaction. */
+  --ink: #000000;
+  --on-ink: #f2f0ea;
+
+  /* Primary actions invert instead of colouring. */
+  --paper: #eae7df;
+  --on-paper: #0b0b0d;
+
+  /* The clearance ladder — the only hues in the product. */
+  --c0: #6f7480;
+  --c1: #5b86c9;
+  --c2: #c2913f;
+  --c3: #c05049;
+
+  --danger: #c05049;
+
+  /* Kept so existing call sites keep working; both resolve to non-hues. */
+  --accent: var(--paper);
+  --accent-soft: #ffffff12;
+  --agent: #9a9aa6;
 }
 
 @media (prefers-color-scheme: light) {
   :root {
-    --background: #f7f8fa;
+    color-scheme: light;
+
+    --background: #f4f2ee;
     --surface: #ffffff;
-    --surface-raised: #f0f2f6;
-    --border: #dfe3ea;
-    --foreground: #171a21;
-    --muted: #5f6879;
-    --accent: #4d5fd6;
-    --accent-soft: #4d5fd614;
-    --agent: #5f6879;
-    --danger: #c0392b;
+    --surface-raised: #eeece7;
+    --border: #d9d5cc;
+    --border-strong: #b8b2a6;
+    --foreground: #14140f;
+    --muted: #64615a;
+
+    --ink: #000000;
+    --on-ink: #f2f0ea;
+
+    --paper: #14140f;
+    --on-paper: #f4f2ee;
+
+    --c0: #6b6f78;
+    --c1: #3f68a8;
+    --c2: #8f6413;
+    --c3: #9d3831;
+
+    --danger: #9d3831;
+
+    --accent: var(--paper);
+    --accent-soft: #0000000d;
+    --agent: #64615a;
   }
 }
 
@@ -38,22 +96,86 @@
   --color-surface: var(--surface);
   --color-surface-raised: var(--surface-raised);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-foreground: var(--foreground);
   --color-muted: var(--muted);
+  --color-ink: var(--ink);
+  --color-on-ink: var(--on-ink);
+  --color-paper: var(--paper);
+  --color-on-paper: var(--on-paper);
+  --color-c0: var(--c0);
+  --color-c1: var(--c1);
+  --color-c2: var(--c2);
+  --color-c3: var(--c3);
+  --color-danger: var(--danger);
   --color-accent: var(--accent);
   --color-accent-soft: var(--accent-soft);
   --color-agent: var(--agent);
-  --color-danger: var(--danger);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+
+  --font-sans: var(--font-body);
+  --font-display: var(--font-display);
+  --font-mono: var(--font-mono-face);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
+  font-family: var(--font-body), system-ui, sans-serif;
+}
+
+/*
+ * Institutional labels. Condensed, uppercase, widely tracked — the register of
+ * a form field or a file tab, which is the vernacular this product lives in.
+ * Used for section headers, tile metadata and clearance stamps; never for prose.
+ */
+.label {
+  font-family: var(--font-display), system-ui, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-weight: 600;
+  font-size: 10px;
+  line-height: 1;
+}
+
+/*
+ * A redaction bar.
+ *
+ * Solid ink, sized to the shape of what is missing so the reader can see there
+ * WAS something. The faint diagonal hatch stops it reading as an empty box or a
+ * loading skeleton — it has to look applied, like something was put over the
+ * page rather than left off it.
+ *
+ * There is no text underneath. Anything using this renders no children, because
+ * hiding text with CSS would still ship it to view-source and to a screen
+ * reader, which for an authorisation product would be the whole failure.
+ */
+.redacted {
+  background-color: var(--ink);
+  background-image: repeating-linear-gradient(
+    -45deg,
+    #ffffff00 0 5px,
+    #ffffff0a 5px 6px
+  );
+  border-radius: 1px;
+}
+
+/* Keyboard focus is a paper ring — visible on both themes, and not a hue. */
+:focus-visible {
+  outline: 2px solid var(--paper);
+  outline-offset: 2px;
 }
 
 /* Wide content scrolls inside its own container; the page body never does. */
 .scroll-x {
   overflow-x: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

@@ -33,6 +33,9 @@ export interface PanelState {
   h: number;
   z: number;
   minimized: boolean;
+  /** Fills the viewport. Kept separate from w/h so restoring returns the panel
+   *  to the size and place the user last chose, not to the default. */
+  maximized?: boolean;
 }
 
 interface Ctx {
@@ -41,6 +44,7 @@ interface Ctx {
   close: (chatId: string) => void;
   focus: (chatId: string) => void;
   toggleMinimize: (chatId: string) => void;
+  toggleMaximize: (chatId: string) => void;
   update: (chatId: string, patch: Partial<Pick<PanelState, 'x' | 'y' | 'w' | 'h'>>) => void;
 }
 
@@ -147,6 +151,15 @@ export function FloatingPanelsProvider({ children }: { children: React.ReactNode
     });
   }, [topZ]);
 
+  const toggleMaximize = useCallback((chatId: string) => {
+    setPanels((cur) => {
+      const z = topZ(cur) + 1;
+      return cur.map((p) =>
+        p.chatId === chatId ? { ...p, maximized: !p.maximized, minimized: false, z } : p,
+      );
+    });
+  }, [topZ]);
+
   const update = useCallback(
     (chatId: string, patch: Partial<Pick<PanelState, 'x' | 'y' | 'w' | 'h'>>) => {
       setPanels((cur) => cur.map((p) => (p.chatId === chatId ? { ...p, ...patch } : p)));
@@ -155,8 +168,8 @@ export function FloatingPanelsProvider({ children }: { children: React.ReactNode
   );
 
   const value = useMemo<Ctx>(
-    () => ({ panels, open, close, focus, toggleMinimize, update }),
-    [panels, open, close, focus, toggleMinimize, update],
+    () => ({ panels, open, close, focus, toggleMinimize, toggleMaximize, update }),
+    [panels, open, close, focus, toggleMinimize, toggleMaximize, update],
   );
 
   return (

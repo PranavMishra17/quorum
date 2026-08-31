@@ -2,8 +2,10 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getActor, createClient } from '@/lib/db/server';
 import { SignOut } from '../_components/sign-out';
+import { ClearanceStamp } from '../_components/clearance';
 import { FloatingPanelsProvider } from '../_components/floating-panels/context';
 import { FloatingPanelHost } from '../_components/floating-panels/host';
+import { adminModeEnabled } from '@/lib/auth/admin-mode';
 
 /**
  * The authenticated shell.
@@ -19,64 +21,82 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!actor) redirect('/');
 
   const supabase = await createClient();
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('display_name, color')
-    .eq('id', actor.id)
-    .maybeSingle();
+  const [{ data: profile }, { data: clearances }] = await Promise.all([
+    supabase.from('profiles').select('display_name, color').eq('id', actor.id).maybeSingle(),
+    supabase.from('user_clearances').select('clearances(key, name, level)').eq('user_id', actor.id),
+  ]);
 
-  const { data: clearances } = await supabase
-    .from('user_clearances')
-    .select('clearances(key, name, level)')
-    .eq('user_id', actor.id);
-
-  const held = ((clearances ?? []) as unknown as { clearances: { name: string; level: number } | null }[])
+  const held = ((clearances ?? []) as unknown as
+    { clearances: { name: string; level: number } | null }[]
+  )
     .map((r) => r.clearances)
     .filter((c): c is { name: string; level: number } => Boolean(c))
     .sort((a, b) => b.level - a.level);
 
   const me = profile as { display_name: string; color: string } | null;
+  const top = held[0] ?? null;
 
   return (
     <FloatingPanelsProvider>
-    <div className="flex min-h-full flex-col">
-      <header className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-6xl items-center gap-4 px-4 py-3">
-          <Link href="/chats" className="text-sm font-semibold tracking-tight">
-            Quorum
-          </Link>
+      <div className="flex min-h-full flex-col">
+        <header className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur">
+          <div className="mx-auto flex w-full max-w-6xl items-center gap-5 px-5 py-3">
+            <Link href="/chats" className="font-display text-base font-bold tracking-tight">
+              QUORUM
+            </Link>
 
-          <Link href="/people" className="text-xs text-muted transition hover:text-foreground">
-            People
-          </Link>
-          <Link href="/connectors" className="text-xs text-muted transition hover:text-foreground">
-            Connectors
-          </Link>
-          <Link href="/usage" className="text-xs text-muted transition hover:text-foreground">
-            Usage
-          </Link>
+            <nav className="flex items-center gap-4">
+              <NavLink href="/chats">Workspace</NavLink>
+              <NavLink href="/people">Clearances</NavLink>
+              <NavLink href="/connectors">Connectors</NavLink>
+              <NavLink href="/usage">Usage</NavLink>
+              {adminModeEnabled() && (
+                <Link
+                  href="/admin"
+                  className="label border px-2 py-1 transition hover:bg-surface-raised"
+                  style={{ color: 'var(--c3)', borderColor: 'var(--c3)' }}
+                >
+                  Admin
+                </Link>
+              )}
+            </nav>
 
-          <div className="ml-auto flex items-center gap-3">
-            {/* The clearance badge is deliberately always visible: the whole
-                product hinges on the reader knowing what they are cleared for. */}
-            <span className="hidden text-xs text-muted sm:inline">
-              {held.length > 0 ? held[0].name : 'No clearance'}
-            </span>
-            <span
-              className="grid h-7 w-7 place-items-center rounded-full text-xs font-medium text-background"
-              style={{ background: me?.color ?? 'var(--accent)' }}
-              title={me?.display_name ?? actor.email ?? ''}
-            >
-              {(me?.display_name ?? actor.email ?? '?').charAt(0).toUpperCase()}
-            </span>
-            <SignOut />
+            <div className="ml-auto flex items-center gap-3">
+              {/* Always visible: the whole product hinges on the reader knowing
+                  what they are cleared for before they wonder why a room is
+                  missing. */}
+              {top ? (
+                <ClearanceStamp level={top.level} name={top.name} />
+              ) : (
+                <span className="label text-muted">No clearance</span>
+              )}
+              <Link
+                href="/account"
+                title={me?.display_name ?? actor.email ?? 'Your account'}
+                className="grid h-7 w-7 place-items-center text-xs font-semibold"
+                style={{ background: me?.color ?? 'var(--paper)', color: 'var(--on-paper)' }}
+              >
+                {(me?.display_name ?? actor.email ?? '?').charAt(0).toUpperCase()}
+              </Link>
+              <SignOut />
+            </div>
           </div>
-        </div>
-      </header>
+        </header>
 
-      <div className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">{children}</div>
-    </div>
-    <FloatingPanelHost />
+        <div className="mx-auto w-full max-w-6xl flex-1 px-5 py-8">{children}</div>
+      </div>
+      <FloatingPanelHost />
     </FloatingPanelsProvider>
+  );
+}
+
+function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className="label hidden text-muted transition hover:text-foreground sm:inline-block"
+    >
+      {children}
+    </Link>
   );
 }

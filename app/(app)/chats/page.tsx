@@ -1,201 +1,177 @@
 import Link from 'next/link';
 import { createClient, requireActor } from '@/lib/db/server';
-import { NewChat, type Person, type ClearanceOption } from '@/app/_components/new-chat';
-import { PopOutButton } from '@/app/_components/floating-panels/pop-out-button';
 import { namesFor } from '@/lib/db/profiles';
+import { NewChat, type Person, type ClearanceOption } from '@/app/_components/new-chat';
+import {
+  Workspace,
+  type DirectoryPerson,
+  type GroupTile,
+} from '@/app/_components/home/workspace';
 
-export const metadata = { title: 'Chats' };
+export const metadata = { title: 'Workspace' };
 
 /**
- * The chat list. This is the permanent fallback UI (D-017) — the force-directed
- * space view is scheduled last precisely so that if it never lands, nothing
- * essential is missing.
+ * The workspace home: everyone, every group you can see, and the agent.
  *
  * Every query here runs through the SESSION-BOUND client, so row-level security
  * does the filtering. There is no `where I am a member` clause anywhere in this
- * file, and that absence is the point: the list is correct because the database
+ * file, and that absence is the point — the page is correct because the database
  * refuses the rows, not because this component remembered to ask correctly.
+ *
+ * ---------------------------------------------------------------------------
+ * THE ONE PLACE THIS FILE MAKES AN AUTHORISATION DECISION
+ *
+ * It decides what NOT to send. For a group the viewer is cleared for but not a
+ * member of, the member names are never fetched into the payload — the tile
+ * renders redaction bars over an absence rather than over hidden text. RLS
+ * would already refuse those rows, so this is belt and braces; but it means the
+ * redaction is honest in view-source, not just on screen, and for a product
+ * whose whole claim is that unauthorised content never reaches the client that
+ * distinction is the difference between a demo and the thing itself.
  */
-export default async function ChatsPage() {
+export default async function WorkspacePage() {
   const actor = await requireActor();
   const supabase = await createClient();
 
-  const { data: chats } = await supabase
-    .from('chats')
-    .select('id, type, name, required_clearance_id, created_at, clearances:required_clearance_id(name, level)')
-    .order('created_at', { ascending: false });
+  const [
+    { data: chats },
+    { data: myMemberships },
+    { data: profiles },
+    { data: myClearances },
+    { data: allGrants },
+  ] = await Promise.all([
+    supabase
+      .from('chats')
+      .select('id, type, name, created_at, clearances:required_clearance_id(name, level)')
+      .order('created_at', { ascending: false }),
+    supabase.from('chat_members').select('chat_id, status, role').eq('user_id', actor.id),
+    supabase.from('profiles').select('id, display_name, color').order('display_name'),
+    supabase.from('user_clearances').select('clearances(id, name, level)').eq('user_id', actor.id),
+    supabase.from('user_clearances').select('user_id, clearances(name, level)'),
+  ]);
 
-  // Cast through unknown: embedded relations infer as arrays without the
-  // Database generic. See the note at the foot of lib/db/types.ts.
-  const rows = (chats ?? []) as unknown as {
-    id: string; type: 'dm' | 'group' | 'agent'; name: string | null;
-    required_clearance_id: string | null;
+  // Cast through unknown: embedded relations infer as arrays without narrowing.
+  const chatRows = (chats ?? []) as unknown as {
+    id: string;
+    type: 'dm' | 'group' | 'agent';
+    name: string | null;
     clearances: { name: string; level: number } | null;
   }[];
 
-  // Which of these am I actually a member of? A row can be visible for
-  // discovery (a group I am cleared for) without my being in it.
-  const { data: memberships } = await supabase
-    .from('chat_members')
-    .select('chat_id, status')
-    .eq('user_id', actor.id);
-
-  const myStatus = new Map(
-    ((memberships ?? []) as { chat_id: string; status: string }[]).map((m) => [m.chat_id, m.status]),
+  const mine = new Map(
+    ((myMemberships ?? []) as unknown as
+      { chat_id: string; status: string; role: 'admin' | 'member' }[]
+    ).map((m) => [m.chat_id, m]),
   );
 
-  const { data: allMembers } = await supabase
-    .from('chat_members')
-    .select('chat_id, user_id')
-    .eq('status', 'member');
+  // Rosters for chats the viewer is IN. Not fetched for discoverable groups —
+  // see the note above; the redaction has nothing behind it by construction.
+  const joinedIds = chatRows.filter((c) => mine.get(c.id)?.status === 'member').map((c) => c.id);
 
-  const namesByChat = new Map<string, string[]>();
-  const dmNames = await namesFor(
-    supabase,
-    ((allMembers ?? []) as unknown as { user_id: string }[]).map((r) => r.user_id),
-  );
+  const { data: joinedMembers } = joinedIds.length
+    ? await supabase
+        .from('chat_members')
+        .select('chat_id, user_id')
+        .in('chat_id', joinedIds)
+        .eq('status', 'member')
+    : { data: [] };
 
-  for (const r of (allMembers ?? []) as unknown as { chat_id: string; user_id: string }[]) {
-    const who = dmNames.get(r.user_id);
+  const rosterRows = (joinedMembers ?? []) as unknown as { chat_id: string; user_id: string }[];
+  const rosterNames = await namesFor(supabase, rosterRows.map((r) => r.user_id));
+
+  const byChat = new Map<string, string[]>();
+  const idsByChat = new Map<string, string[]>();
+  for (const r of rosterRows) {
+    const ids = idsByChat.get(r.chat_id) ?? [];
+    ids.push(r.user_id);
+    idsByChat.set(r.chat_id, ids);
+
+    const who = rosterNames.get(r.user_id);
     if (!who) continue;
-    const list = namesByChat.get(r.chat_id) ?? [];
-    list.push(who.name);
-    namesByChat.set(r.chat_id, list);
+    const names = byChat.get(r.chat_id) ?? [];
+    names.push(who.name);
+    byChat.set(r.chat_id, names);
   }
 
-  // Everyone the viewer could start a chat with. Profiles are readable by any
-  // signed-in user by design — you cannot click a person to DM them if you
-  // cannot see that they exist.
-  const { data: profiles } = await supabase
-    .from('profiles')
-    .select('id, display_name, color')
-    .neq('id', actor.id)
-    .order('display_name');
+  // ---- people ------------------------------------------------------------
+  const highest = new Map<string, { name: string; level: number }>();
+  for (const g of (allGrants ?? []) as unknown as
+    { user_id: string; clearances: { name: string; level: number } | null }[]) {
+    if (!g.clearances) continue;
+    const cur = highest.get(g.user_id);
+    if (!cur || g.clearances.level > cur.level) highest.set(g.user_id, g.clearances);
+  }
 
-  // Only clearances the viewer HOLDS. create_chat() refuses a chat above your
-  // own level anyway; offering the option would just be an error waiting to
-  // happen.
-  const { data: myClearances } = await supabase
-    .from('user_clearances')
-    .select('clearances(id, name, level)')
-    .eq('user_id', actor.id);
+  // An existing DM per person, so a tile can open straight into it rather than
+  // round-tripping /api/dm to discover it already exists.
+  const dmByPerson = new Map<string, string>();
+  for (const c of chatRows) {
+    if (c.type !== 'dm' || mine.get(c.id)?.status !== 'member') continue;
+    const other = (idsByChat.get(c.id) ?? []).find((id) => id !== actor.id);
+    if (other) dmByPerson.set(other, c.id);
+  }
 
-  const people: Person[] = ((profiles ?? []) as unknown as
+  const people: DirectoryPerson[] = ((profiles ?? []) as unknown as
     { id: string; display_name: string; color: string }[]
-  ).map((p) => ({ id: p.id, name: p.display_name, color: p.color }));
+  )
+    .filter((p) => p.id !== actor.id)
+    .map((p) => ({
+      id: p.id,
+      name: p.display_name,
+      color: p.color,
+      clearance: highest.get(p.id) ?? null,
+      dmChatId: dmByPerson.get(p.id) ?? null,
+    }));
+
+  // ---- groups ------------------------------------------------------------
+  const groups: GroupTile[] = chatRows
+    .filter((c) => c.type === 'group')
+    .map((c) => {
+      const m = mine.get(c.id);
+      const isMember = m?.status === 'member';
+      return {
+        id: c.id,
+        name: c.name ?? 'Untitled group',
+        clearance: c.clearances,
+        memberNames: isMember ? (byChat.get(c.id) ?? []) : [],
+        memberCount: isMember ? (byChat.get(c.id) ?? []).length : null,
+        status: isMember ? 'member' : m?.status === 'requested' ? 'requested' : 'discoverable',
+        role: isMember ? (m?.role ?? 'member') : null,
+      };
+    });
+
+  // The viewer's own solo chat with the agent, if they have made one.
+  const agentChatId =
+    chatRows.find((c) => c.type === 'agent' && mine.get(c.id)?.status === 'member')?.id ?? null;
 
   const clearanceOptions: ClearanceOption[] = ((myClearances ?? []) as unknown as
     { clearances: ClearanceOption | null }[]
-  ).map((r) => r.clearances).filter((c): c is ClearanceOption => Boolean(c))
+  )
+    .map((r) => r.clearances)
+    .filter((c): c is ClearanceOption => Boolean(c))
     .sort((a, b) => a.level - b.level);
 
-  const joined = rows.filter((c) => myStatus.get(c.id) === 'member');
-  const discoverable = rows.filter((c) => myStatus.get(c.id) !== 'member');
+  const newChatPeople: Person[] = people.map((p) => ({ id: p.id, name: p.name, color: p.color }));
 
   return (
     <div className="space-y-10">
-      <section>
-        <div className="mb-4 flex items-start justify-between gap-4">
-          <div>
-            <h1 className="mb-1 text-lg font-semibold">Your chats</h1>
-            <p className="text-xs text-muted">
-              The agent is present in every one of these and decides for itself
-              whether to speak.
-            </p>
-          </div>
-          <NewChat people={people} clearances={clearanceOptions} />
-        </div>
+      <Workspace people={people} groups={groups} agentChatId={agentChatId} />
 
-        {joined.length === 0 ? (
-          <EmptyState />
-        ) : (
-          <ul className="grid gap-2 sm:grid-cols-2">
-            {joined.map((c) => {
-              const title = c.name ?? (c.type === 'dm' ? 'Direct message' : 'Untitled');
-              return (
-                <li key={c.id} className="relative">
-                  <Link
-                    href={`/chat/${c.id}`}
-                    className="block rounded-lg border border-border bg-surface p-4 pr-9 transition hover:border-accent"
-                  >
-                    <ChatHeading chat={c} members={namesByChat.get(c.id) ?? []} />
-                  </Link>
-                  <PopOutButton
-                    chatId={c.id}
-                    title={title}
-                    className="absolute right-2 top-2"
-                  />
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
-
-      {discoverable.length > 0 && (
-        <section>
-          <h2 className="mb-1 text-sm font-semibold">Discoverable</h2>
-          <p className="mb-4 max-w-2xl text-xs leading-relaxed text-muted">
-            Groups you are cleared for but not a member of. You can see that
-            they exist, and nothing else — no messages, no roster, no files.
-            A chat above your clearance does not appear here at all, because the
-            existence of a restricted conversation is itself disclosure.
+      <section className="border-t border-border pt-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <p className="max-w-xl text-xs leading-relaxed text-muted">
+            Direct messages open by clicking someone above. Use this to start a
+            group, or a second private chat with the agent.
           </p>
-          <ul className="grid gap-2 sm:grid-cols-2">
-            {discoverable.map((c) => (
-              <li
-                key={c.id}
-                className="rounded-lg border border-dashed border-border bg-surface/50 p-4 opacity-70"
-              >
-                <ChatHeading chat={c} members={[]} />
-                <p className="mt-2 text-xs text-muted">
-                  {myStatus.get(c.id) === 'requested'
-                    ? 'Join request pending.'
-                    : 'Not a member.'}
-                </p>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-    </div>
-  );
-}
-
-function ChatHeading({
-  chat, members,
-}: {
-  chat: { type: string; name: string | null; clearances: { name: string } | null };
-  members: string[];
-}) {
-  return (
-    <>
-      <div className="flex items-start justify-between gap-3">
-        <span className="font-medium">
-          {chat.name ?? (chat.type === 'dm' ? 'Direct message' : 'Untitled')}
-        </span>
-        <span className="shrink-0 rounded bg-accent-soft px-2 py-0.5 text-[10px] uppercase tracking-wide text-accent">
-          {chat.clearances?.name ?? chat.type}
-        </span>
-      </div>
-      {members.length > 0 && (
-        <p className="mt-1 truncate text-xs text-muted">{members.join(', ')}</p>
-      )}
-    </>
-  );
-}
-
-function EmptyState() {
-  return (
-    <div className="rounded-lg border border-dashed border-border p-8 text-center">
-      <p className="text-sm text-muted">
-        You are not a member of any chat.
-      </p>
-      <p className="mx-auto mt-2 max-w-md text-xs leading-relaxed text-muted">
-        This is what a non-member sees — not an error, not an empty list with a
-        hint of what is behind it. The database returns nothing, so there is
-        nothing to render.
-      </p>
+          <NewChat people={newChatPeople} clearances={clearanceOptions} />
+        </div>
+        <Link
+          href="/account"
+          className="mt-4 inline-block text-xs text-foreground underline underline-offset-4"
+        >
+          Your clearances and groups
+        </Link>
+      </section>
     </div>
   );
 }

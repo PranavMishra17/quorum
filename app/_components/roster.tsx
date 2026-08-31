@@ -65,7 +65,7 @@ export function Roster({
   const administered = chatType === 'group';
 
   return (
-    <aside className="rounded-lg border border-border bg-surface p-4">
+    <aside className="border border-border bg-surface p-4">
       <h2 className="mb-3 text-sm font-medium">
         In this chat
         <span className="ml-2 font-normal text-muted">{active.length}</span>
@@ -123,7 +123,7 @@ export function Roster({
                 <button
                   onClick={() => act('approve', m.userId)}
                   disabled={busy === m.userId}
-                  className="shrink-0 text-[10px] text-accent transition hover:underline disabled:opacity-50"
+                  className="shrink-0 text-[10px] text-foreground transition hover:underline disabled:opacity-50"
                 >
                   approve
                 </button>

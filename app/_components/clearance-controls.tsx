@@ -67,13 +67,13 @@ export function ClearanceControls({
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
         placeholder={`Filter ${people.length} people`}
-        className="mb-3 w-full max-w-sm rounded border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
+        className="mb-3 w-full max-w-sm border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-border-strong"
       />
 
       {error && <p className="mb-3 text-xs text-danger">{error}</p>}
 
       {grantable.length === 0 && (
-        <p className="mb-3 rounded border border-dashed border-border p-3 text-xs text-muted">
+        <p className="mb-3 border border-dashed border-border p-3 text-xs text-muted">
           You hold no clearance, so you cannot grant one. Someone who holds a
           rung has to grant it to you first — which is the rule that keeps the
           axis meaningful.
@@ -84,7 +84,7 @@ export function ClearanceControls({
         {shown.map((p) => (
           <li
             key={p.id}
-            className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded border border-border bg-surface px-3 py-2"
+            className="flex flex-wrap items-center gap-x-3 gap-y-2 border border-border bg-surface px-3 py-2"
           >
             <span
               className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-[10px] text-background"
@@ -116,10 +116,10 @@ export function ClearanceControls({
                         ? held ? `Revoke ${r.name}` : `Grant ${r.name}`
                         : `${r.name} is above your own clearance`
                     }
-                    className={`rounded px-2 py-0.5 text-[10px] uppercase tracking-wide transition ${
+                    className={` px-2 py-0.5 text-[10px] uppercase tracking-wide transition ${
                       held
-                        ? 'bg-accent-soft text-accent hover:line-through'
-                        : 'border border-dashed border-border text-muted hover:border-accent hover:text-foreground'
+                        ? 'bg-surface-raised text-foreground hover:line-through'
+                        : 'border border-dashed border-border text-muted hover:border-border-strong hover:text-foreground'
                     } disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:no-underline`}
                   >
                     {r.name}

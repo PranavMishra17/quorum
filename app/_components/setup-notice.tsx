@@ -25,13 +25,13 @@ export function SetupNotice() {
         <li>
           <strong>Create a Supabase project</strong>
           <p className="mt-1 text-xs leading-relaxed text-muted">
-            Follow <code className="text-accent">docs/SETUP-SUPABASE.md</code>.
+            Follow <code className="text-foreground">docs/SETUP-SUPABASE.md</code>.
             It lists the exact dashboard pages and the three values you need.
           </p>
         </li>
         <li>
           <strong>Fill in the environment</strong>
-          <pre className="scroll-x mt-1 rounded border border-border bg-surface p-3 text-xs">
+          <pre className="scroll-x mt-1 border border-border bg-surface p-3 text-xs">
 {`cp .env.example .env.local
 # then paste the Supabase URL, publishable key, secret key,
 # and your Anthropic key`}
@@ -39,14 +39,14 @@ export function SetupNotice() {
         </li>
         <li>
           <strong>Apply the migrations</strong>
-          <pre className="scroll-x mt-1 rounded border border-border bg-surface p-3 text-xs">
+          <pre className="scroll-x mt-1 border border-border bg-surface p-3 text-xs">
 {`pnpm supabase link --project-ref YOUR-REF
 pnpm supabase db push`}
           </pre>
         </li>
         <li>
           <strong>Seed a workspace to click around</strong>
-          <pre className="scroll-x mt-1 rounded border border-border bg-surface p-3 text-xs">
+          <pre className="scroll-x mt-1 border border-border bg-surface p-3 text-xs">
 {`pnpm seed:dev`}
           </pre>
           <p className="mt-1 text-xs leading-relaxed text-muted">
@@ -60,7 +60,7 @@ pnpm supabase db push`}
 
       <p className="text-xs leading-relaxed text-muted">
         The test suite needs none of this — it runs its own PostgreSQL.{' '}
-        <code className="text-accent">pnpm test</code> works on a fresh clone.
+        <code className="text-foreground">pnpm test</code> works on a fresh clone.
       </p>
     </main>
   );

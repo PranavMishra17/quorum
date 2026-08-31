@@ -41,7 +41,7 @@ export function SignIn({
       <button
         onClick={signInWithGoogle}
         disabled={busy}
-        className="w-full rounded-lg border border-border bg-surface-raised px-4 py-3 text-sm font-medium transition hover:border-accent disabled:opacity-50"
+        className="w-full border border-border bg-surface-raised px-4 py-3 text-sm font-medium transition hover:border-border-strong disabled:opacity-50"
       >
         {busy ? 'Redirecting…' : 'Continue with Google'}
       </button>
@@ -69,7 +69,7 @@ export function SignIn({
               <li key={u.key}>
                 <a
                   href={`/auth/dev?user=${u.key}`}
-                  className="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface px-3 py-2.5 text-sm transition hover:border-accent"
+                  className="flex items-center justify-between gap-3 border border-border bg-surface px-3 py-2.5 text-sm transition hover:border-border-strong"
                 >
                   <span className="min-w-0">
                     <span className="block font-medium">{u.displayName}</span>
@@ -78,8 +78,8 @@ export function SignIn({
                     </span>
                   </span>
                   <span
-                    className={`shrink-0 rounded bg-accent-soft px-2 py-0.5 text-[10px] uppercase tracking-wide ${
-                      u.clearance ? 'text-accent' : 'text-muted'
+                    className={`shrink-0  bg-surface-raised px-2 py-0.5 text-[10px] uppercase tracking-wide ${
+                      u.clearance ? 'text-foreground' : 'text-muted'
                     }`}
                   >
                     {u.clearance ?? 'none'}

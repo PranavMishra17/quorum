@@ -67,7 +67,7 @@ export default async function UsagePage() {
       </div>
 
       {rows.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted">
+        <p className="border border-dashed border-border p-8 text-center text-sm text-muted">
           No model calls yet.
         </p>
       ) : (
@@ -77,7 +77,7 @@ export default async function UsagePage() {
         </div>
       )}
 
-      <Link href="/chats" className="inline-block text-xs text-accent underline">
+      <Link href="/chats" className="inline-block text-xs text-foreground underline">
         Back to chats
       </Link>
     </div>
@@ -102,7 +102,7 @@ function group<T extends { cost_estimate: string | null; input_tokens: number | 
 
 function Stat({ label, value, tone }: { label: string; value: string; tone?: 'danger' }) {
   return (
-    <div className="rounded-lg border border-border bg-surface p-4">
+    <div className="border border-border bg-surface p-4">
       <div className="text-xs text-muted">{label}</div>
       <div className={`mt-1 text-xl font-semibold ${tone === 'danger' ? 'text-danger' : ''}`}>
         {value}
@@ -120,7 +120,7 @@ function Breakdown({
   return (
     <section>
       <h2 className="mb-2 text-sm font-medium">{title}</h2>
-      <div className="scroll-x rounded-lg border border-border">
+      <div className="scroll-x border border-border">
         <table className="w-full text-xs">
           <thead className="text-muted">
             <tr className="border-b border-border">

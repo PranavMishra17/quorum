@@ -31,7 +31,7 @@ export function PopOutButton({
         open(chatId, title);
       }}
       title={`Open "${title}" in a floating panel`}
-      className={`rounded px-1.5 py-0.5 text-xs text-muted transition hover:bg-accent-soft hover:text-accent ${className}`}
+      className={`px-1.5 py-0.5 text-xs text-muted transition hover:bg-surface-raised hover:text-foreground ${className}`}
     >
       ⇱
     </button>

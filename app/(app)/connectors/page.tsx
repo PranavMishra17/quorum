@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { createClient, requireActor } from '@/lib/db/server';
 import { googleConnectorConfigured, GOOGLE_SCOPES } from '@/lib/connectors/google';
-import { untypedRpc } from '@/lib/connectors/rpc';
+import { untypedDb } from '@/lib/connectors/rpc';
 import { Disconnect } from './disconnect';
 
 export const metadata = { title: 'Connectors' };
@@ -30,7 +30,7 @@ export default async function ConnectorsPage({
   const { status } = await searchParams;
   const supabase = await createClient();
 
-  const { data, error } = await untypedRpc(supabase).rpc('connector_status');
+  const { data, error } = await untypedDb(supabase).rpc('connector_status');
   if (error) {
     // Surfaced rather than swallowed. A discarded error here would render as
     // "not connected" — the exact failure that made a user look like a
@@ -62,7 +62,7 @@ export default async function ConnectorsPage({
 
       {status && <StatusBanner status={status} />}
 
-      <section className="rounded-lg border border-border p-5">
+      <section className="border border-border p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h2 className="text-sm font-medium">Google — Gmail and Calendar</h2>
@@ -73,7 +73,7 @@ export default async function ConnectorsPage({
           </div>
 
           {!configured ? (
-            <span className="rounded border border-border px-2 py-1 text-xs text-muted">
+            <span className="border border-border px-2 py-1 text-xs text-muted">
               Not configured on this deployment
             </span>
           ) : google ? (
@@ -81,7 +81,7 @@ export default async function ConnectorsPage({
           ) : (
             <a
               href="/api/connectors/google/start"
-              className="rounded bg-accent px-3 py-1.5 text-xs font-medium text-background"
+              className="bg-accent px-3 py-1.5 text-xs font-medium text-background"
             >
               Connect Google
             </a>
@@ -127,7 +127,7 @@ export default async function ConnectorsPage({
         </div>
       </section>
 
-      <Link href="/chats" className="inline-block text-xs text-accent underline">
+      <Link href="/chats" className="inline-block text-xs text-foreground underline">
         Back to chats
       </Link>
     </div>
@@ -160,7 +160,7 @@ function StatusBanner({ status }: { status: string }) {
 
   return (
     <p
-      className={`rounded border px-3 py-2 text-xs ${
+      className={` border px-3 py-2 text-xs ${
         message.tone === 'ok'
           ? 'border-border text-foreground'
           : 'border-danger/40 text-danger'

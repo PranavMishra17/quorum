@@ -1,8 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 /**
- * Call a function that migration 0014 adds but the generated types do not know
- * about yet.
+ * Reach a table or function that a NEW migration adds but the generated types
+ * do not know about yet.
  *
  * `lib/db/types.ts` is `supabase gen types --linked` output: it describes the
  * schema of the LINKED PROJECT, not of the migrations in this repo. So every
@@ -17,13 +17,16 @@ import type { SupabaseClient } from '@supabase/supabase-js';
  *
  *   pnpm supabase db push
  *   pnpm supabase gen types typescript --linked > lib/db/types.ts
- *   # then remove this file and the three imports of it
+ *   # then delete this file and its imports
  *
- * It weakens typing for these calls only. The migration is the source of truth
- * either way, and the real check is that `tests/` runs the migrations against a
- * real Postgres — which catches a wrong function name far more decisively than
- * a generated type would.
+ * Currently covering: `connector_tokens` and its RPCs (0014), and
+ * `admin_mode_log` and the `dev_self_*` RPCs (0016).
+ *
+ * It weakens typing at those call sites only. The migration is the source of
+ * truth either way, and the real check is that `tests/` runs every migration
+ * against a real Postgres — which catches a wrong table or function name far
+ * more decisively than a generated type would.
  */
-export function untypedRpc<T>(client: SupabaseClient<T>): SupabaseClient {
+export function untypedDb<T>(client: SupabaseClient<T>): SupabaseClient {
   return client as unknown as SupabaseClient;
 }

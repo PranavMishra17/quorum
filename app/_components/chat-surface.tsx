@@ -291,7 +291,7 @@ export function ChatSurface({
 
   if (revoked) {
     return (
-      <div className="rounded-lg border border-dashed border-border p-8 text-center">
+      <div className="border border-dashed border-border p-8 text-center">
         <p className="text-sm">You are no longer a member of this chat.</p>
         <p className="mt-2 text-xs text-muted">
           Live updates have been stopped. Reloading will show what you can still
@@ -347,26 +347,39 @@ function MessageRow({
 }) {
   const isAgent = message.senderType === 'agent';
 
-  // The agent is aligned right with a monochrome treatment and a monospace
-  // label, so it is never mistaken for a person at a glance. Humans get their
-  // own colour; the agent deliberately gets none.
+  /**
+   * The agent sits on the right in ink-edged monochrome with a machine label;
+   * people sit on the left in their own colour. Two axes of difference, so it
+   * survives being glanced at, and survives a colour-blind reader.
+   *
+   * The BUBBLE is right-aligned for the agent; the TEXT inside it is not. An
+   * earlier version set `text-right` on the whole block, which put the bullets
+   * of a list on the wrong side of their items and made every reply the agent
+   * formatted read as broken. Alignment is a property of the bubble's place in
+   * the column, not of the prose inside it.
+   */
   return (
     <div className={`flex flex-col ${isAgent ? 'items-end' : 'items-start'}`}>
-      <div className={`max-w-[85%] ${isAgent ? 'text-right' : ''}`}>
+      <div className="max-w-[85%]">
         <span
-          className={`mb-1 block text-xs ${isAgent ? 'font-mono uppercase tracking-wider text-agent' : ''}`}
+          className={`mb-1 block ${
+            isAgent
+              ? 'label text-right text-agent'
+              : 'text-xs font-medium'
+          }`}
           style={isAgent ? undefined : { color: message.senderColor }}
         >
           {isAgent ? 'Quorum' : isMe ? 'You' : message.senderName}
         </span>
         <div
-          className={`rounded-lg px-3 py-2 text-sm leading-relaxed ${
+          className={`px-3 py-2 text-left text-sm leading-relaxed ${
             isAgent
-              ? 'border border-border bg-surface-raised text-foreground'
-              : 'bg-surface'
+              ? 'border-l-2 border border-border bg-surface-raised text-foreground'
+              : 'border border-border bg-surface'
           } ${message.pending ? 'opacity-50' : ''} ${
-            message.failed ? 'border border-danger' : ''
+            message.failed ? 'border-danger' : ''
           }`}
+          style={isAgent ? { borderLeftColor: 'var(--agent)' } : undefined}
         >
           <MessageContent content={message.content} />
         </div>
@@ -379,7 +392,9 @@ function MessageRow({
           />
         )}
         {message.failed && (
-          <span className="mt-1 block text-xs text-danger">Not sent.</span>
+          <span className="mt-1 block text-xs" style={{ color: 'var(--danger)' }}>
+            Not sent.
+          </span>
         )}
       </div>
     </div>
@@ -450,7 +465,7 @@ function Composer({
           affordances are named here rather than in documentation nobody opens. */}
       <form onSubmit={submit} className="flex gap-2">
         <label
-          className="grid cursor-pointer place-items-center rounded-lg border border-border bg-surface-raised px-3 text-sm transition hover:border-accent"
+          className="grid cursor-pointer place-items-center border border-border bg-surface-raised px-3 text-sm transition hover:border-border-strong"
           title="Attach a document — txt, md, csv, html, json, xml, PDF or Word (.docx)"
         >
           {uploading ? '…' : '+'}
@@ -471,14 +486,14 @@ function Composer({
               // popup renders BEHIND an open panel — found by actually opening
               // one and typing "/" on the page underneath it, not by inspecting
               // either component in isolation.
-              className="absolute bottom-full left-0 z-50 mb-1 w-full overflow-hidden rounded-lg border border-border bg-surface-raised shadow-lg"
+              className="absolute bottom-full left-0 z-50 mb-1 w-full overflow-hidden border border-border-strong bg-surface-raised shadow-lg"
             >
               {suggestions.map((c) => (
                 <li key={c.name}>
                   <button
                     type="button"
                     onClick={() => pickCommand(c.usage)}
-                    className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-xs transition hover:bg-accent-soft"
+                    className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-xs transition hover:bg-surface-raised"
                   >
                     <span className="font-mono text-foreground">{c.usage}</span>
                     <span className="text-muted">{c.description}</span>
@@ -493,13 +508,13 @@ function Composer({
             onChange={(e) => { setValue(e.target.value); setMenuDismissed(false); }}
             onKeyDown={(e) => { if (e.key === 'Escape') setMenuDismissed(true); }}
             placeholder="Message — @quorum to address the agent, / for commands"
-            className="w-full rounded-lg border border-border bg-surface px-3 py-2.5 text-sm outline-none transition focus:border-accent"
+            className="w-full border border-border bg-surface px-3 py-2.5 text-sm outline-none transition focus:border-border-strong"
           />
         </div>
         <button
           type="submit"
           disabled={!value.trim()}
-          className="rounded-lg border border-border bg-surface-raised px-4 text-sm transition hover:border-accent disabled:opacity-40"
+          className="label border border-border-strong px-4 transition hover:bg-surface-raised disabled:opacity-40"
         >
           Send
         </button>

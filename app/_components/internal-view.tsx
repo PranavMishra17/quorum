@@ -70,7 +70,7 @@ export function InternalView({
   const totals = useMemo(() => summarise(events, calls), [events, calls]);
 
   return (
-    <section className="mt-4 rounded-lg border border-border bg-surface">
+    <section className="mt-4 border border-border bg-surface">
       <button
         onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
@@ -81,7 +81,7 @@ export function InternalView({
         </span>
         <span className="flex items-center gap-3 text-xs text-muted">
           {totals.withheld > 0 && (
-            <span className="rounded bg-accent-soft px-2 py-0.5 text-accent">
+            <span className="bg-surface-raised px-2 py-0.5 text-foreground">
               {totals.withheld} memory withheld
             </span>
           )}
@@ -142,12 +142,12 @@ function summarise(events: EventRow[], calls: CallRow[]) {
 
 function Turn({ turn }: { turn: ReturnType<typeof summariseTurn> }) {
   return (
-    <li className="rounded border border-border bg-surface-raised p-3">
+    <li className="border border-border bg-surface-raised p-3">
       <div className="mb-2 flex flex-wrap items-baseline gap-2 text-xs">
         <span
-          className={`rounded px-1.5 py-0.5 font-medium ${
+          className={` px-1.5 py-0.5 font-medium ${
             turn.verdict === 'respond' || turn.verdict === 'research'
-              ? 'bg-accent-soft text-accent'
+              ? 'bg-surface-raised text-foreground'
               : 'text-muted'
           }`}
         >

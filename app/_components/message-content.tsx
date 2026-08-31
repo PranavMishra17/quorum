@@ -58,7 +58,7 @@ function BlockNode({ block }: { block: Block }) {
       // Wide code scrolls inside its own box; the chat column never scrolls
       // sideways because a message was pasted with long lines.
       return (
-        <pre className="overflow-x-auto rounded border border-border bg-background/60 p-2 text-[12px] leading-relaxed">
+        <pre className="overflow-x-auto border border-border bg-background/60 p-2 text-[12px] leading-relaxed">
           <code className="font-mono">{block.text}</code>
         </pre>
       );
@@ -118,7 +118,7 @@ function InlineNode({ node }: { node: Inline }) {
       );
     case 'code':
       return (
-        <code className="rounded bg-background/60 px-1 py-0.5 font-mono text-[0.9em]">
+        <code className="bg-background/60 px-1 py-0.5 font-mono text-[0.9em]">
           {node.text}
         </code>
       );
@@ -131,7 +131,7 @@ function InlineNode({ node }: { node: Inline }) {
           href={node.href}
           target="_blank"
           rel="noopener noreferrer nofollow"
-          className="text-accent underline underline-offset-2"
+          className="text-foreground underline underline-offset-2"
         >
           {node.label}
         </a>
