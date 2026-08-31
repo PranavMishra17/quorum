@@ -1,77 +1,140 @@
 import { createClient, requireActor } from '@/lib/db/server';
-import { ClearanceControls, type DirectoryPerson, type Rung } from '@/app/_components/clearance-controls';
+import { namesFor } from '@/lib/db/profiles';
+import { Rooms, type RoomSummary } from '@/app/_components/rooms/rooms';
 
-export const metadata = { title: 'People' };
+export const metadata = { title: 'Rooms' };
 
 /**
- * The directory, and the clearance-granting surface.
+ * Every conversation you are in, with the chat itself alongside — the
+ * Slack-shaped view.
  *
- * This page exists because a Phase 2 sanity check found that `user_clearances`
- * had no write path at all: a user who signed in fresh held nothing, could not
- * see or create a gated chat, and the second authorisation axis was unreachable
- * outside the seed script. D-003 said grants were administrative; that had been
- * implemented as "nobody can grant anything".
+ * The workspace home answers "who and what exists here". This answers "what is
+ * happening in the rooms I am already in", which is a different question and
+ * was previously unanswerable: there was no way to see your conversations as a
+ * list, so returning to one meant remembering which tile it was behind.
  *
- * The rule enforced in `grant_clearance()` is the one real systems use: **you
- * cannot grant a clearance you do not hold yourself.** The UI hides what the
- * viewer cannot grant, but the database is what refuses it —
- * `tests/authorization/clearance-grants.test.ts` proves a level-2 user cannot
- * mint level 3 no matter what the page offers.
+ * This page replaced the old People/clearance-granting page. Granting moved to
+ * the Account page rather than being dropped: it is the write path for
+ * authorisation axis two (D-003) and a real product feature, so it belongs on
+ * an ordinary page rather than behind the admin gate.
+ *
+ * ---------------------------------------------------------------------------
+ * UNREAD, AND WHY IT IS APPROXIMATE
+ *
+ * There is no `last_read_at` column, and adding one is a schema change plus a
+ * write on every chat open. So "unread" here means *messages since your own
+ * last message in that room* — which is right for the common case and wrong if
+ * you read without replying. It is labelled "new since you last wrote" rather
+ * than "unread", because a number that means something slightly different from
+ * its label is worse than a longer label.
  */
-export default async function PeoplePage() {
+export default async function RoomsPage() {
   const actor = await requireActor();
   const supabase = await createClient();
 
-  const [{ data: profiles }, { data: grants }, { data: ladder }] = await Promise.all([
-    supabase.from('profiles').select('id, display_name, color').order('display_name'),
-    supabase.from('user_clearances').select('user_id, clearances(id, name, level)'),
-    supabase.from('clearances').select('id, key, name, level').order('level'),
-  ]);
+  const { data: memberships } = await supabase
+    .from('chat_members')
+    .select('chat_id, role, chats(id, type, name, clearances:required_clearance_id(name, level))')
+    .eq('user_id', actor.id)
+    .eq('status', 'member');
 
-  const rungs = ((ladder ?? []) as unknown as Rung[]);
+  const rows = ((memberships ?? []) as unknown as {
+    chat_id: string;
+    role: 'admin' | 'member';
+    chats: {
+      id: string; type: 'dm' | 'group' | 'agent'; name: string | null;
+      clearances: { name: string; level: number } | null;
+    } | null;
+  }[]).filter((m) => m.chats);
 
-  const byUser = new Map<string, Rung[]>();
-  for (const g of (grants ?? []) as unknown as
-    { user_id: string; clearances: Rung | null }[]) {
-    if (!g.clearances) continue;
-    const list = byUser.get(g.user_id) ?? [];
-    list.push(g.clearances);
-    byUser.set(g.user_id, list);
+  const chatIds = rows.map((r) => r.chat_id);
+
+  const [{ data: recent }, { data: rosters }] = chatIds.length
+    ? await Promise.all([
+        // Newest 400 across the viewer's rooms: enough to give every room a
+        // preview and a count without a query per room.
+        supabase
+          .from('messages')
+          .select('chat_id, sender_id, sender_type, content, created_at')
+          .in('chat_id', chatIds)
+          .order('created_at', { ascending: false })
+          .limit(400),
+        supabase
+          .from('chat_members')
+          .select('chat_id, user_id')
+          .in('chat_id', chatIds)
+          .eq('status', 'member'),
+      ])
+    : [{ data: [] }, { data: [] }];
+
+  const messages = (recent ?? []) as unknown as {
+    chat_id: string; sender_id: string | null; sender_type: 'user' | 'agent';
+    content: string; created_at: string;
+  }[];
+
+  const memberRows = (rosters ?? []) as unknown as { chat_id: string; user_id: string }[];
+  const names = await namesFor(supabase, memberRows.map((m) => m.user_id));
+
+  const rosterByChat = new Map<string, { id: string; name: string; color: string }[]>();
+  for (const m of memberRows) {
+    const who = names.get(m.user_id);
+    if (!who) continue;
+    const list = rosterByChat.get(m.chat_id) ?? [];
+    list.push({ id: m.user_id, name: who.name, color: who.color });
+    rosterByChat.set(m.chat_id, list);
   }
 
-  const people: DirectoryPerson[] = ((profiles ?? []) as unknown as
-    { id: string; display_name: string; color: string }[]
-  ).map((p) => ({
-    id: p.id,
-    name: p.display_name,
-    color: p.color,
-    clearances: (byUser.get(p.id) ?? []).sort((a, b) => a.level - b.level),
-  }));
+  const rooms: RoomSummary[] = rows.map((r) => {
+    const chat = r.chats!;
+    const mine = messages.filter((m) => m.chat_id === r.chat_id);
+    const latest = mine[0] ?? null;
+    const myLast = mine.find((m) => m.sender_id === actor.id);
+    const since = myLast
+      ? mine.filter((m) => m.created_at > myLast.created_at && m.sender_id !== actor.id).length
+      : mine.filter((m) => m.sender_id !== actor.id).length;
 
-  const myTop = Math.max(
-    -1,
-    ...(byUser.get(actor.id) ?? []).map((c) => c.level),
-  );
+    const roster = rosterByChat.get(r.chat_id) ?? [];
+    const others = roster.filter((p) => p.id !== actor.id);
 
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-lg font-semibold">People</h1>
-        <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted">
-          Clearance is the second authorisation axis: independent of membership,
-          and required as well as it. You can grant any rung{' '}
-          <strong>at or below your own</strong> — never above, because a user who
-          could mint a higher clearance could read everything through whoever
-          they granted it to.
-        </p>
-      </div>
+    return {
+      id: chat.id,
+      type: chat.type,
+      name:
+        chat.name ??
+        (chat.type === 'dm'
+          ? others[0]?.name ?? 'Direct message'
+          : chat.type === 'agent'
+            ? 'Q'
+            : 'Untitled'),
+      clearance: chat.clearances,
+      role: r.role,
+      members: others,
+      memberCount: roster.length,
+      lastMessage: latest
+        ? {
+            preview: latest.content.slice(0, 140),
+            at: latest.created_at,
+            fromAgent: latest.sender_type === 'agent',
+            fromName: latest.sender_id === actor.id
+              ? 'You'
+              : latest.sender_type === 'agent'
+                ? 'Q'
+                : names.get(latest.sender_id ?? '')?.name ?? 'Someone',
+          }
+        : null,
+      unread: since,
+    };
+  });
 
-      <ClearanceControls
-        people={people}
-        rungs={rungs}
-        meId={actor.id}
-        myTopLevel={myTop}
-      />
-    </div>
-  );
+  // Busiest-first is wrong here: a room you have unread messages in should come
+  // first even if it has been quiet for a week, because that is the reason you
+  // opened this page.
+  rooms.sort((a, b) => {
+    if (a.unread !== b.unread) return b.unread - a.unread;
+    const at = a.lastMessage?.at ?? '';
+    const bt = b.lastMessage?.at ?? '';
+    return bt.localeCompare(at);
+  });
+
+  return <Rooms rooms={rooms} meId={actor.id} />;
 }

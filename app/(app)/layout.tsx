@@ -47,8 +47,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
             <nav className="flex items-center gap-4">
               <NavLink href="/chats">Workspace</NavLink>
-              <NavLink href="/people">Clearances</NavLink>
-              <NavLink href="/connectors">Connectors</NavLink>
+              <NavLink href="/people">Rooms</NavLink>
+              <NavLink href="/connectors">Capabilities</NavLink>
               <NavLink href="/usage">Usage</NavLink>
               {adminModeEnabled() && (
                 <Link

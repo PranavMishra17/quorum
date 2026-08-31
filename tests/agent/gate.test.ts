@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { GATE } from '@/config';
-import { evaluateChain, mentionsAgent, withinCooldown, type GateInput } from '@/lib/agent/gate';
+import {
+  addressesAgentByName,
+  evaluateChain,
+  mentionsAgent,
+  withinCooldown,
+  type GateInput,
+} from '@/lib/agent/gate';
 
 /**
  * The deterministic chain is tested exhaustively BECAUSE it is deterministic.
@@ -194,5 +200,84 @@ describe('the chain is pure', () => {
       expect(r.rule).toBeTruthy();
       expect(r.reason.length).toBeGreaterThan(10);
     }
+  });
+});
+
+
+/**
+ * Addressing the agent as "Q".
+ *
+ * This was a real, reported failure: the tile on the home page says Q, so a user
+ * typed "q pull up my email data" and was ignored three times in a row, because
+ * the mention list held only `@quorum`. An agent that ignores its own name reads
+ * as broken, not as restrained — which is the opposite of what the gate is for.
+ */
+describe('the agent answers to Q', () => {
+  const dm = (content: string) =>
+    evaluateChain(
+      input({ chatType: 'dm', humanMemberCount: 2, message: { senderType: 'user', senderId: 'u1', content } }),
+    );
+
+  it.each([
+    'q pull up my email data',
+    'Q, what does the contract say?',
+    'q: summarise this',
+    'quorum can you help',
+    'agent what is the term',
+  ])('responds when the message opens with a name it answers to: %s', (content) => {
+    expect(dm(content)).toMatchObject({ decided: true, verdict: 'respond' });
+  });
+
+  it.each(['@q pull up my email', '@quorum hello', '@agent hello'])(
+    'responds to an @-mention anywhere: %s',
+    (content) => {
+      expect(dm(content)).toMatchObject({ decided: true, verdict: 'respond', rule: 'mention' });
+    },
+  );
+
+  /**
+   * The reason a bare `q` is a LEADING-only token rather than a mention token:
+   * matched anywhere, it fires on ordinary prose, and an agent that barges into
+   * a private conversation because someone wrote "q4" is worse than one that
+   * misses a greeting.
+   */
+  it.each([
+    'the q4 numbers look wrong',
+    'add this to the queue please',
+    'quarterly review is on Thursday',
+    'I asked a question',
+    'send it to hq for signing',
+  ])('stays out of a DM that merely contains a q-word: %s', (content) => {
+    expect(dm(content)).toMatchObject({ decided: true, verdict: 'silent', rule: 'unaddressed_dm' });
+  });
+
+  it('a name alone counts as addressing it', () => {
+    expect(addressesAgentByName('q?')).toBe(true);
+    expect(addressesAgentByName('quorum')).toBe(true);
+  });
+
+  it('requires a boundary after the name', () => {
+    expect(addressesAgentByName('queue the file')).toBe(false);
+    expect(addressesAgentByName('q-tip')).toBe(false);
+    expect(addressesAgentByName('quorums are hard')).toBe(false);
+  });
+
+  it('ignores leading whitespace, as a paste would leave', () => {
+    expect(addressesAgentByName('   q what is this')).toBe(true);
+  });
+
+  it('only matches at the START — mid-sentence does not count', () => {
+    expect(addressesAgentByName('can you ask q about this')).toBe(false);
+  });
+
+  it('every configured prefix is matched, so config and code cannot drift', () => {
+    for (const token of GATE.addressPrefixes) {
+      expect(addressesAgentByName(`${token} hello`), token).toBe(true);
+    }
+  });
+
+  it('reports its own rule name, distinct from an @-mention', () => {
+    expect(dm('q hello')).toMatchObject({ rule: 'addressed' });
+    expect(dm('@q hello')).toMatchObject({ rule: 'mention' });
   });
 });

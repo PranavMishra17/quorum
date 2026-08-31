@@ -183,7 +183,7 @@ export function FloatingPanelWindow({ panel }: { panel: PanelState }) {
         onPointerMove={panel.maximized ? undefined : onHeaderPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
-        className={`flex shrink-0 items-center gap-2 border-b border-border bg-surface-raised px-3 py-2 ${
+        className={`flex shrink-0 items-center gap-2 border-b border-border bg-surface-raised px-3 py-2.5 ${
           panel.maximized ? '' : 'cursor-move'
         }`}
       >
@@ -222,7 +222,11 @@ export function FloatingPanelWindow({ panel }: { panel: PanelState }) {
         </button>
       </div>
 
-      <div className="min-h-0 flex-1">
+      {/* px-3 pb-3: the transcript and composer were flush against the panel
+          border, which made a 360px window feel like a cramped tooltip rather
+          than a chat. The full-page chat gets its padding from the page layout;
+          a panel has no page, so it supplies its own. */}
+      <div className="min-h-0 flex-1 px-3 pb-3">
         {data === 'loading' && (
           // A skeleton in the shape of the transcript, not the word "Loading".
           // Opening a DM for the first time also creates it, which takes a

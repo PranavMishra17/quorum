@@ -155,19 +155,17 @@ export default async function WorkspacePage() {
 
   return (
     <div className="space-y-10">
-      <Workspace people={people} groups={groups} agentChatId={agentChatId} />
+      <Workspace
+        people={people}
+        groups={groups}
+        agentChatId={agentChatId}
+        newChat={<NewChat people={newChatPeople} clearances={clearanceOptions} />}
+      />
 
       <section className="border-t border-border pt-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <p className="max-w-xl text-xs leading-relaxed text-muted">
-            Direct messages open by clicking someone above. Use this to start a
-            group, or a second private chat with the agent.
-          </p>
-          <NewChat people={newChatPeople} clearances={clearanceOptions} />
-        </div>
         <Link
           href="/account"
-          className="mt-4 inline-block text-xs text-foreground underline underline-offset-4"
+          className="text-xs text-foreground underline underline-offset-4"
         >
           Your clearances and groups
         </Link>

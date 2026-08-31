@@ -3,8 +3,9 @@ import { createClient, requireActor } from '@/lib/db/server';
 import { googleConnectorConfigured, GOOGLE_SCOPES } from '@/lib/connectors/google';
 import { untypedDb } from '@/lib/connectors/rpc';
 import { Disconnect } from './disconnect';
+import { CAPABILITIES, CAPABILITY_GROUPS, type Capability } from '@/lib/agent/catalogue';
 
-export const metadata = { title: 'Connectors' };
+export const metadata = { title: 'Capabilities' };
 
 /**
  * Connected external accounts.
@@ -51,7 +52,57 @@ export default async function ConnectorsPage({
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-lg font-semibold">Connectors</h1>
+        <h1 className="font-display text-2xl font-semibold">Capabilities</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
+          Everything Quorum can do, and what each one costs you. The second
+          column is the one worth reading — every capability here takes
+          something in exchange, and a page that lists only what a product can
+          do is marketing.
+        </p>
+      </div>
+
+      {(Object.keys(CAPABILITY_GROUPS) as Capability['group'][]).map((key) => {
+        const group = CAPABILITY_GROUPS[key];
+        const items = CAPABILITIES.filter((c) => c.group === key);
+        if (items.length === 0) return null;
+        return (
+          <section key={key}>
+            <h2 className="label text-foreground">{group.title}</h2>
+            <p className="mb-3 mt-1 max-w-2xl text-xs leading-relaxed text-muted">{group.blurb}</p>
+            <ul className="divide-y divide-border border border-border">
+              {items.map((c) => (
+                <li key={c.title} className="grid gap-3 p-4 sm:grid-cols-[1fr_1fr]">
+                  <div>
+                    <p className="flex flex-wrap items-baseline gap-2">
+                      <span className="text-sm font-medium">{c.title}</span>
+                      {c.tool ? (
+                        <span className="font-mono text-[11px] text-muted">{c.tool}</span>
+                      ) : (
+                        <span className="label text-muted">not a tool</span>
+                      )}
+                    </p>
+                    <p className="mt-1 text-xs leading-relaxed text-muted">{c.what}</p>
+                    {c.requires && (
+                      <p className="label mt-2" style={{ color: 'var(--c2)' }}>
+                        {c.requires}
+                      </p>
+                    )}
+                  </div>
+                  <div className="border-l border-border pl-3 sm:pl-4">
+                    <p className="label text-muted">What it costs</p>
+                    <p className="mt-1 text-xs leading-relaxed">{c.cost}</p>
+                    <p className="label mt-3 text-muted">Bounded by</p>
+                    <p className="mt-1 text-xs leading-relaxed text-muted">{c.limit}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        );
+      })}
+
+      <div className="border-t border-border pt-8">
+        <h2 className="label text-foreground">Connected accounts</h2>
         <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted">
           External accounts the agent may read <strong>on your behalf, in your
           own turns only</strong>. A connection is stored against your user and
@@ -127,8 +178,8 @@ export default async function ConnectorsPage({
         </div>
       </section>
 
-      <Link href="/chats" className="inline-block text-xs text-foreground underline">
-        Back to chats
+      <Link href="/chats" className="inline-block text-xs underline underline-offset-4">
+        Back to the workspace
       </Link>
     </div>
   );

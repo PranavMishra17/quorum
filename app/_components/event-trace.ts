@@ -116,6 +116,16 @@ export interface TurnSummary {
   /** True once turn_completed or turn_failed has landed. */
   finished: boolean;
   failed: boolean;
+  /**
+   * Unfinished, and nothing has happened for long enough that nothing will.
+   *
+   * A turn runs inside `after()`, so if that invocation dies — a timeout, a
+   * deploy mid-turn, a crash before the first event write — no terminal event
+   * is ever written and the trace has nothing to tell it the turn is over. A
+   * "sent…" that pulses forever is a worse lie than an error: it says the agent
+   * is still thinking about a message from last Tuesday.
+   */
+  stalled: boolean;
   /** A short, present-tense status line for a turn that is STILL RUNNING. */
   liveStatus: string;
 }
@@ -125,6 +135,14 @@ export interface TurnSummary {
  * need, so "what does a running turn look like" and "what does a finished one
  * look like" are decided once.
  */
+/**
+ * How long a turn may go without an event before the trace calls it stalled.
+ *
+ * Comfortably longer than the slowest legitimate step — a research turn's model
+ * call can run for minutes — so this never fires on a turn that is merely slow.
+ */
+const STALL_AFTER_MS = 5 * 60 * 1000;
+
 export function summariseTurn(turnId: string, events: EventRow[], calls: CallRow[] = []): TurnSummary {
   const ordered = [...events].sort((a, b) => a.created_at.localeCompare(b.created_at));
   const gate = ordered.find((e) => e.event_type === 'gate_evaluated');
@@ -148,8 +166,16 @@ export function summariseTurn(turnId: string, events: EventRow[], calls: CallRow
     reason: gate?.payload.reason ? String(gate.payload.reason) : undefined,
     finished: Boolean(completed || failed),
     failed: Boolean(failed),
+    stalled: !completed && !failed && isStale(ordered),
     liveStatus: liveStatusFor(ordered),
   };
+}
+
+function isStale(ordered: EventRow[]): boolean {
+  const last = ordered.at(-1);
+  if (!last) return false;
+  const at = Date.parse(last.created_at);
+  return Number.isFinite(at) && Date.now() - at > STALL_AFTER_MS;
 }
 
 /**

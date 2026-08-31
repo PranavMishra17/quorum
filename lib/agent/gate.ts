@@ -66,6 +66,30 @@ export function mentionsAgent(content: string): boolean {
   });
 }
 
+/**
+ * Does this message OPEN by addressing the agent by name?
+ *
+ * Separate from `mentionsAgent` because these tokens are matched only at the
+ * start. The agent is called Q on screen, so "q pull up my email" is the
+ * obvious way to talk to it — and a bare `q` in the anywhere-matching list
+ * would fire on "the q4 numbers" or a stray letter mid-sentence.
+ *
+ * Requires whitespace or punctuation after the name, so "queue", "quarterly"
+ * and "agenda" are unaffected. A message that is ONLY the name also counts:
+ * "quorum?" is addressed at it.
+ */
+export function addressesAgentByName(content: string): boolean {
+  const text = content.trim().toLowerCase();
+  return GATE.addressPrefixes.some((raw) => {
+    const token = raw.toLowerCase();
+    if (!text.startsWith(token)) return false;
+    const next = text.charAt(token.length);
+    // End of message, whitespace, or punctuation — but not a letter, digit,
+    // hyphen or underscore, which would make it a different word.
+    return next === '' || !/[\w-]/.test(next);
+  });
+}
+
 /** True when the agent spoke recently enough that it should hold back. */
 export function withinCooldown(
   lastAgentMessageAt: Date | null,
@@ -103,11 +127,18 @@ export function evaluateChain(input: GateInput): ChainResult {
     };
   }
 
-  // 3. Explicitly named.
+  // 3. Explicitly named — either anywhere in the message (@quorum, @q) or as
+  //     the opening word ("q, what does the MSA say?").
   if (mentionsAgent(input.message.content)) {
     return {
       decided: true, verdict: 'respond', rule: 'mention',
       reason: 'the agent was mentioned by name',
+    };
+  }
+  if (addressesAgentByName(input.message.content)) {
+    return {
+      decided: true, verdict: 'respond', rule: 'addressed',
+      reason: 'the message opens by addressing the agent by name',
     };
   }
 

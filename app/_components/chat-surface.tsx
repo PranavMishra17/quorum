@@ -62,6 +62,8 @@ export function ChatSurface({
    */
   const [messages, setMessages] = useState<UiMessage[]>(initialMessages);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const landedRef = useRef(false);
 
   /**
    * Newest persisted `created_at` seen so far — the polling watermark.
@@ -103,7 +105,24 @@ export function ChatSurface({
     [messages],
   );
 
+  /**
+   * Open at the bottom; animate only afterwards.
+   *
+   * A chat opens at the newest message, the way every chat app does — you
+   * should not have to scroll past a month of history to see what was just
+   * said. The first pass jumps the container directly rather than calling
+   * `scrollIntoView({behavior:'smooth'})`, because smooth-scrolling 200
+   * messages animates the whole backlog past the reader on open, which looks
+   * like the page is loading badly.
+   */
   useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (!landedRef.current) {
+      el.scrollTop = el.scrollHeight;
+      landedRef.current = true;
+      return;
+    }
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length]);
 
@@ -303,7 +322,7 @@ export function ChatSurface({
 
   return (
     <div className={containerClassName}>
-      <div className="flex-1 space-y-4 overflow-y-auto pr-1">
+      <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-1 py-2">
         {messages.length === 0 && (
           <p className="py-12 text-center text-sm text-muted">No messages yet.</p>
         )}
@@ -327,7 +346,7 @@ export function ChatSurface({
         })}
         <div ref={bottomRef} />
       </div>
-      <Composer chatId={chatId} onSend={send} />
+      <Composer chatId={chatId} onSend={send} people={people} meId={meId} />
     </div>
   );
 }
@@ -401,11 +420,26 @@ function MessageRow({
   );
 }
 
+interface MentionOption { handle: string; label: string; hint: string; color?: string }
+
+/**
+ * The `@` fragment being typed, or null.
+ *
+ * Matched only at the start of the message or after whitespace, so an email
+ * address does not open a mention menu halfway through being typed.
+ */
+export function activeMention(value: string): string | null {
+  const m = /(?:^|\s)@([\w-]*)$/.exec(value);
+  return m ? m[1] : null;
+}
+
 function Composer({
-  chatId, onSend,
+  chatId, onSend, people, meId,
 }: {
   chatId: string;
   onSend: (text: string) => Promise<void>;
+  people: Record<string, { name: string; color: string }>;
+  meId: string;
 }) {
   const [value, setValue] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -415,7 +449,34 @@ function Composer({
   const [menuDismissed, setMenuDismissed] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const suggestions = menuDismissed ? [] : matchingCommands(value);
+  const commandSuggestions = menuDismissed ? [] : matchingCommands(value);
+
+  /**
+   * Who can be mentioned here: the agent first, then everyone else in the room.
+   *
+   * The agent leads the list because addressing it is the one mention that
+   * CHANGES BEHAVIOUR — in a DM it is the difference between the agent
+   * answering and staying silent — whereas mentioning a person is decoration
+   * the app does not act on. Ordering by consequence rather than alphabetically.
+   */
+  const mentionable: MentionOption[] = useMemo(() => {
+    const roster = Object.entries(people)
+      .filter(([id]) => id !== meId)
+      .map(([, p]) => ({ handle: p.name.split(' ')[0].toLowerCase(), label: p.name, hint: 'in this chat', color: p.color }));
+    return [
+      { handle: 'q', label: 'Q', hint: 'the agent — makes it answer' },
+      { handle: 'quorum', label: 'Quorum', hint: 'the agent, long form' },
+      ...roster,
+    ];
+  }, [people, meId]);
+
+  const fragment = menuDismissed ? null : activeMention(value);
+  const mentionSuggestions =
+    fragment === null
+      ? []
+      : mentionable
+          .filter((o) => o.handle.startsWith(fragment.toLowerCase()))
+          .slice(0, 6);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -432,6 +493,14 @@ function Composer({
     const withSpace = usage.replace(/<[^>]+>$/, '').trimEnd() + ' ';
     setValue(withSpace);
     setMenuDismissed(true);
+    inputRef.current?.focus();
+  }
+
+  function pickMention(handle: string) {
+    // Replace only the fragment being typed, so mentioning someone mid-sentence
+    // does not discard what came before it.
+    setValue((cur) => cur.replace(/(?:@)([\w-]*)$/, `@${handle} `));
+    setMenuDismissed(false);
     inputRef.current?.focus();
   }
 
@@ -478,7 +547,36 @@ function Composer({
           />
         </label>
         <div className="relative flex-1">
-          {suggestions.length > 0 && (
+          {mentionSuggestions.length > 0 && (
+            <ul
+              role="listbox"
+              className="absolute bottom-full left-0 z-50 mb-1 w-full overflow-hidden border border-border-strong bg-surface-raised shadow-lg"
+            >
+              {mentionSuggestions.map((o) => (
+                <li key={o.handle}>
+                  <button
+                    type="button"
+                    onClick={() => pickMention(o.handle)}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition hover:bg-surface"
+                  >
+                    <span
+                      className="grid h-5 w-5 shrink-0 place-items-center text-[10px] font-semibold"
+                      style={{
+                        background: o.color ?? 'var(--ink)',
+                        color: o.color ? 'var(--on-paper)' : 'var(--on-ink)',
+                      }}
+                      aria-hidden
+                    >
+                      {o.label.charAt(0).toUpperCase()}
+                    </span>
+                    <span className="font-mono text-foreground">@{o.handle}</span>
+                    <span className="truncate text-muted">{o.label} · {o.hint}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {commandSuggestions.length > 0 && (
             <ul
               role="listbox"
               // z-50: the floating-panel host sits at z-40 (see
@@ -488,7 +586,7 @@ function Composer({
               // either component in isolation.
               className="absolute bottom-full left-0 z-50 mb-1 w-full overflow-hidden border border-border-strong bg-surface-raised shadow-lg"
             >
-              {suggestions.map((c) => (
+              {commandSuggestions.map((c) => (
                 <li key={c.name}>
                   <button
                     type="button"
@@ -507,7 +605,7 @@ function Composer({
             value={value}
             onChange={(e) => { setValue(e.target.value); setMenuDismissed(false); }}
             onKeyDown={(e) => { if (e.key === 'Escape') setMenuDismissed(true); }}
-            placeholder="Message — @quorum to address the agent, / for commands"
+            placeholder="Message — @ to mention, / for commands"
             className="w-full border border-border bg-surface px-3 py-2.5 text-sm outline-none transition focus:border-border-strong"
           />
         </div>
@@ -519,7 +617,7 @@ function Composer({
           Send
         </button>
       </form>
-      {suggestions.length === 0 &&
+      {commandSuggestions.length === 0 &&
         SLASH_COMMANDS.some((c) => value.trim().toLowerCase().startsWith(c.name)) && (
           <p className="mt-2 text-xs text-muted">
             {SLASH_COMMANDS.find((c) => value.trim().toLowerCase().startsWith(c.name))?.description}

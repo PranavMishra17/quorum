@@ -50,7 +50,24 @@ export const GATE = {
   onJudgeFailure: 'silent',
 
   /** Names the agent answers to. Matched case-insensitively, word-boundary. */
-  mentionTokens: ['@quorum', '@agent', 'quorum'],
+  mentionTokens: ['@quorum', '@agent', '@q', 'quorum'],
+
+  /**
+   * Single words that address the agent ONLY at the start of a message.
+   *
+   * The agent is called Q on screen, so "q pull up my email" is the obvious way
+   * to talk to it — and it was silently ignored, three times in a row, because
+   * the mention list only held `@quorum`. Which reads as a broken agent, not as
+   * a restrained one.
+   *
+   * These are deliberately NOT in `mentionTokens`, because that list matches
+   * anywhere in a message and a bare `q` would then fire on "the q4 numbers" or
+   * a stray letter mid-sentence. Addressing someone by a one-letter name is
+   * something people only do at the START of a sentence, so that is the only
+   * place it counts. Followed by whitespace or punctuation, so "queue" and
+   * "quarterly" are unaffected.
+   */
+  addressPrefixes: ['q', 'quorum', 'agent'],
 } as const;
 
 // ---------------------------------------------------------------------------

@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { createClient, requireActor } from '@/lib/db/server';
 import { ClearanceStamp } from '@/app/_components/clearance';
 import { adminModeEnabled } from '@/lib/auth/admin-mode';
+import { ClearanceControls, type DirectoryPerson, type Rung } from '@/app/_components/clearance-controls';
 import { CLEARANCES } from '@/config';
 
 export const metadata = { title: 'Account' };
@@ -23,7 +24,14 @@ export default async function AccountPage() {
   const actor = await requireActor();
   const supabase = await createClient();
 
-  const [{ data: profile }, { data: grants }, { data: memberships }] = await Promise.all([
+  const [
+    { data: profile },
+    { data: grants },
+    { data: memberships },
+    { data: everyone },
+    { data: allGrants },
+    { data: ladder },
+  ] = await Promise.all([
     supabase.from('profiles').select('display_name, color, created_at').eq('id', actor.id).maybeSingle(),
     supabase
       .from('user_clearances')
@@ -33,6 +41,9 @@ export default async function AccountPage() {
       .from('chat_members')
       .select('role, status, chats(id, type, name, clearances:required_clearance_id(name, level))')
       .eq('user_id', actor.id),
+    supabase.from('profiles').select('id, display_name, color').order('display_name'),
+    supabase.from('user_clearances').select('user_id, clearances(id, name, level)'),
+    supabase.from('clearances').select('id, key, name, level').order('level'),
   ]);
 
   const me = profile as { display_name: string; color: string; created_at: string } | null;
@@ -60,6 +71,28 @@ export default async function AccountPage() {
 
   const groups = rooms.filter((r) => r.chat.type === 'group');
   const dms = rooms.filter((r) => r.chat.type === 'dm');
+
+  // Granting moved here from the old People page when that became the rooms
+  // view. It is a real product feature (D-003's write path), not a dev tool, so
+  // it lives on an ordinary page rather than behind the admin gate.
+  const rungs = (ladder ?? []) as unknown as Rung[];
+
+  const grantsByUser = new Map<string, Rung[]>();
+  for (const g of (allGrants ?? []) as unknown as { user_id: string; clearances: Rung | null }[]) {
+    if (!g.clearances) continue;
+    const list = grantsByUser.get(g.user_id) ?? [];
+    list.push(g.clearances);
+    grantsByUser.set(g.user_id, list);
+  }
+
+  const directory: DirectoryPerson[] = ((everyone ?? []) as unknown as
+    { id: string; display_name: string; color: string }[]
+  ).map((p) => ({
+    id: p.id,
+    name: p.display_name,
+    color: p.color,
+    clearances: (grantsByUser.get(p.id) ?? []).sort((a, b) => a.level - b.level),
+  }));
 
   return (
     <div className="space-y-10">
@@ -152,6 +185,23 @@ export default async function AccountPage() {
             ? 'None yet — click someone in the directory to start one.'
             : `${dms.length} open conversation${dms.length === 1 ? '' : 's'}.`}
         </p>
+      </section>
+
+      <section>
+        <h2 className="label mb-1 text-foreground">Grant clearance to someone</h2>
+        <p className="mb-4 max-w-2xl text-xs leading-relaxed text-muted">
+          You can grant any rung <strong>at or below your own</strong> — never
+          above. A user who could mint a higher clearance could read everything
+          through whoever they granted it to, so the rule is enforced in
+          <code className="mx-1 font-mono">grant_clearance()</code> rather than
+          by this page hiding a button.
+        </p>
+        <ClearanceControls
+          people={directory}
+          rungs={rungs}
+          meId={actor.id}
+          myTopLevel={topLevel ?? -1}
+        />
       </section>
 
       {adminModeEnabled() && (

@@ -63,7 +63,13 @@ const STORAGE_KEY = 'quorum:floating-panels:v1';
  * growing with however many chats someone middle-clicks in a session.
  */
 const MAX_PANELS = 4;
-const DEFAULT_SIZE = { w: 360, h: 460 };
+/**
+ * Wider than it looks like it needs to be. A chat panel narrower than ~400px
+ * wraps almost every sentence twice and turns the agent's formatted replies
+ * into a column of fragments — the transcript is the content, so the window is
+ * sized for it rather than for the desktop it floats over.
+ */
+const DEFAULT_SIZE = { w: 420, h: 540 };
 
 export function FloatingPanelsProvider({ children }: { children: React.ReactNode }) {
   const [panels, setPanels] = useState<PanelState[]>([]);

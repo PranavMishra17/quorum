@@ -81,10 +81,24 @@ export function TurnTrace({
   // with a turnId and zero events. Render nothing rather than an empty shell.
   if (turn.events.length === 0 && !pendingSend) return null;
 
+  // Unfinished and gone quiet: the invocation that was running this turn died
+  // without writing a terminal event. Say so, rather than pulsing indefinitely.
+  if (turn.stalled) {
+    return (
+      <p className="mt-1 text-xs text-muted">
+        This turn stopped without finishing — the agent never replied.
+      </p>
+    );
+  }
+
   if (!turn.finished) {
     return (
       <p className="mt-1 flex items-center gap-1.5 text-xs text-muted">
-        <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-accent" aria-hidden />
+        <span
+          className="inline-block h-1.5 w-1.5 animate-pulse rounded-full"
+          style={{ background: 'var(--paper)' }}
+          aria-hidden
+        />
         {turn.events.length === 0 ? 'sent…' : turn.liveStatus}
       </p>
     );

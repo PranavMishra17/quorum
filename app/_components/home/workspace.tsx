@@ -58,16 +58,29 @@ export function Workspace({
   people,
   groups,
   agentChatId,
+  newChat,
 }: {
   people: DirectoryPerson[];
   groups: GroupTile[];
   /** The viewer's own solo chat with the agent, created on demand if absent. */
   agentChatId: string | null;
+  /**
+   * The "New chat" control, passed in rather than built here.
+   *
+   * It needs server-fetched data (the roster, and only the clearances the
+   * viewer actually holds), and this is a client component. Slotting it in
+   * keeps that query on the server where it belongs, and puts the control in
+   * the toggle bar — creating a group used to mean scrolling past 55 people to
+   * find it.
+   */
+  newChat?: React.ReactNode;
 }) {
   const router = useRouter();
   const { open } = useFloatingPanels();
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
+  const [tab, setTab] = useState<'people' | 'groups'>('people');
+  const [expanded, setExpanded] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const filtered = useMemo(() => {
@@ -152,80 +165,148 @@ export function Workspace({
     return () => window.removeEventListener('keydown', onKey);
   }, [openAgent]);
 
+  /**
+   * Four rows, then a door.
+   *
+   * At 55 people the grid ran to five screens and buried the Groups section
+   * under it, so creating a group meant scrolling past everyone in the company.
+   * Four rows is enough to read the directory as a directory; the rest is one
+   * click away, and searching bypasses the cap entirely because a search result
+   * you have to expand to see is not a search result.
+   */
+  const searching = query.trim() !== '';
+  const perRow = 5;
+  const qTileCost = searching ? 0 : 2; // Q occupies two cells in the first row
+  const visibleCap = perRow * VISIBLE_ROWS - qTileCost;
+  const shown = searching || expanded ? filtered : filtered.slice(0, visibleCap);
+  const hiddenCount = filtered.length - shown.length;
+
   return (
-    <div className="space-y-12">
+    <div className="space-y-8">
       <Search value={query} onChange={setQuery} inputRef={searchRef} count={filtered.length} />
 
-      <section>
-        <SectionHead title="Directory" note={`${people.length} people`} />
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-          {/* Q spans two columns and is the only ink-black surface on the page. */}
-          {query.trim() === '' && (
+      {/* One toggle instead of a long scroll. Both counts are always visible,
+          so the tab you are not on still tells you what is there. */}
+      <div className="flex items-center gap-px border-b border-border">
+        <Tab active={tab === 'people'} onClick={() => setTab('people')}>
+          Directory <span className="ml-1.5 opacity-60">{people.length}</span>
+        </Tab>
+        <Tab active={tab === 'groups'} onClick={() => setTab('groups')}>
+          Groups <span className="ml-1.5 opacity-60">{groups.length}</span>
+        </Tab>
+        <span className="ml-auto pb-2">{newChat}</span>
+      </div>
+
+      {tab === 'people' ? (
+        <section>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+            {!searching && (
+              <button
+                onClick={() => void openAgent()}
+                disabled={busy === 'agent'}
+                className="col-span-2 flex min-h-[7.5rem] flex-col justify-between p-4 text-left transition"
+                style={{ background: 'var(--ink)', color: 'var(--on-ink)' }}
+              >
+                <span className="flex items-start justify-between">
+                  <span className="font-display text-5xl font-bold leading-none">Q</span>
+                  <kbd
+                    className="label border px-1.5 py-1 opacity-50"
+                    style={{ borderColor: 'currentColor' }}
+                  >
+                    Q
+                  </kbd>
+                </span>
+                <span className="text-xs leading-snug opacity-70">
+                  {busy === 'agent'
+                    ? 'Opening…'
+                    : 'The agent, alone. It is in every other chat too, and decides for itself whether to speak.'}
+                </span>
+              </button>
+            )}
+
+            {shown.map((p) => (
+              <PersonTile
+                key={p.id}
+                person={p}
+                busy={busy === p.id}
+                onOpen={() => void openPerson(p)}
+              />
+            ))}
+
+            {hiddenCount > 0 && (
+              <button
+                onClick={() => setExpanded(true)}
+                className="flex min-h-[7.5rem] flex-col items-center justify-center gap-1 border border-dashed border-border-strong text-center transition hover:bg-surface-raised"
+              >
+                <span className="font-display text-2xl font-semibold">+{hiddenCount}</span>
+                <span className="label text-muted">Show all</span>
+              </button>
+            )}
+
+            {filtered.length === 0 && (
+              <p className="col-span-full py-8 text-center text-sm text-muted">
+                Nobody matches “{query}”.
+              </p>
+            )}
+          </div>
+
+          {expanded && !searching && (
             <button
-              onClick={() => void openAgent()}
-              disabled={busy === 'agent'}
-              className="group col-span-2 flex min-h-[7.5rem] flex-col justify-between p-4 text-left transition"
-              style={{ background: 'var(--ink)', color: 'var(--on-ink)' }}
+              onClick={() => setExpanded(false)}
+              className="label mt-3 text-muted transition hover:text-foreground"
             >
-              <span className="flex items-start justify-between">
-                <span className="font-display text-5xl font-bold leading-none">Q</span>
-                <kbd className="label border px-1.5 py-1 opacity-50" style={{ borderColor: 'currentColor' }}>
-                  Q
-                </kbd>
-              </span>
-              <span className="text-xs leading-snug opacity-70">
-                {busy === 'agent'
-                  ? 'Opening…'
-                  : 'The agent, alone. It is in every other chat too, and decides for itself whether to speak.'}
-              </span>
+              Show fewer
             </button>
           )}
-
-          {filtered.map((p) => (
-            <PersonTile
-              key={p.id}
-              person={p}
-              busy={busy === p.id}
-              onOpen={() => void openPerson(p)}
-            />
-          ))}
-
-          {filtered.length === 0 && (
-            <p className="col-span-full py-8 text-center text-sm text-muted">
-              Nobody matches “{query}”.
+        </section>
+      ) : (
+        <section>
+          {groups.length === 0 ? (
+            <p className="border border-dashed border-border p-8 text-center text-sm text-muted">
+              No groups you can see. Create one, or ask for the clearance that
+              would make one visible.
             </p>
+          ) : (
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {groups.map((g) => (
+                <GroupCard key={g.id} group={g} onOpen={() => open(g.id, g.name)} />
+              ))}
+            </div>
           )}
-        </div>
-      </section>
-
-      <section>
-        <SectionHead
-          title="Groups"
-          note={
-            groups.length === 0
-              ? 'none'
-              : `${groups.filter((g) => g.status === 'member').length} joined`
-          }
-        />
-        {groups.length === 0 ? (
-          <p className="border border-dashed border-border p-8 text-center text-sm text-muted">
-            No groups you can see. Create one, or ask an admin for the clearance
-            that would make one visible.
+          <p className="mt-3 max-w-2xl text-xs leading-relaxed text-muted">
+            Groups above your clearance are not listed, greyed out, or counted.
+            The existence of a restricted room is itself disclosure, so there is
+            nothing here to infer one from.
           </p>
-        ) : (
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {groups.map((g) => (
-              <GroupCard key={g.id} group={g} onOpen={() => open(g.id, g.name)} />
-            ))}
-          </div>
-        )}
-        <p className="mt-3 max-w-2xl text-xs leading-relaxed text-muted">
-          Groups above your clearance are not listed, greyed out, or counted.
-          The existence of a restricted room is itself disclosure, so there is
-          nothing here to infer one from.
-        </p>
-      </section>
+        </section>
+      )}
     </div>
+  );
+}
+
+/** Rows of people shown before the grid folds behind "Show all". */
+const VISIBLE_ROWS = 4;
+
+function Tab({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`label border-b-2 px-4 pb-2 pt-1 transition ${
+        active
+          ? 'border-foreground text-foreground'
+          : 'border-transparent text-muted hover:text-foreground'
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -260,15 +341,6 @@ function Search({
           <kbd className="label shrink-0 border border-border px-1.5 py-1 text-muted">/</kbd>
         )}
       </div>
-    </div>
-  );
-}
-
-function SectionHead({ title, note }: { title: string; note: string }) {
-  return (
-    <div className="mb-3 flex items-baseline justify-between border-b border-border pb-2">
-      <h2 className="label text-foreground">{title}</h2>
-      <span className="label text-muted">{note}</span>
     </div>
   );
 }
