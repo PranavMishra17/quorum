@@ -10,17 +10,40 @@
 Organised by claim, not by source file.
 
 ```
-config.test.ts            passes today — see below
+config.test.ts, config-env.test.ts   tier/model invariants, env schema
 authorization/
-  membership.test.ts      axis one: chat_members.status = 'member'
-  clearance.test.ts       axis two: clearance level, plus group administration
+  rls-foundation      auth.uid() actually survives a SECURITY DEFINER role switch (T5)
+  membership          axis one: chat_members.status = 'member'
+  clearance           axis two: clearance level, plus group administration
+  clearance-grants    grant_clearance() — never above the granter's own level
+  create-chat         atomic chat + first-member insert
+  messages            send_message_and_start_turn(), idempotency
+  connector-tokens    RLS on, zero policies — reachable only via SECURITY DEFINER
+  demo-world          ensure_demo_world()/reset_demo_world(), the default-join exclusion
 memory/
-  isolation.test.ts       THE TESTS THAT PROVE THE THESIS
-  lifecycle.test.ts       candidate / active / superseded / stale, conflicts
+  isolation           THE TESTS THAT PROVE THE THESIS
+  lifecycle           candidate / active / superseded / stale
+  conflict            stated beats inferred; newer beats older
+  ranking             ts_rank + recency + speaker presence, over the already-filtered set
+  mine, my-memory     the subject-access read — deliberately ignores the surfacing rule
+  rpc                 memory_for_chat()/write_memory_item() as the only entry points
 agent/
-  gate.test.ts            when the agent speaks and when it does not
+  gate                when the agent speaks and when it does not
+  judge               the LLM step's contract, not its taste
+  research            the bounded multi-step tool loop
+  scoped-context-invariant   no ScopedAgentContext method takes a scope-defining id
+  output-sanitisation, llm-errors
 tools/
-  scoping.test.ts         a tool inherits the chat's authorization boundary
+  scoping             a tool inherits the chat's authorisation boundary
+  document, session, url-safety, safe-name
+connectors/
+  crypto, registration
+auth/
+  dev-login-gate      closed by NODE_ENV, independent of the app flag
+files/
+  extract-text
+ui/
+  catalogue, event-trace, markdown
 ```
 
 ## Running
@@ -69,24 +92,13 @@ rather than on deploy.
 
 ## Current state
 
-| Suite | Passing |
-|---|---|
-| `config.test.ts` | 42 |
-| `authorization/rls-foundation` | 13 |
-| `authorization/membership` | 17 |
-| `authorization/clearance` | 11 |
-| `authorization/messages` | 22 |
-| `memory/isolation` | 23 |
-| `tools/scoping` | 12 |
-| **Total** | **138 passing**, 42 `todo` |
+**628 assertions passing, 17 `todo`, across 34 files** — run `pnpm test` for
+the live count rather than trust a number in a doc that can drift from it.
 
-The `todo` entries that remain cover agent behaviour and memory lifecycle logic
-— the parts that need `lib/` code that does not exist yet.
-
-The `todo` entries are not placeholders in the pejorative sense. They are the
-test list from the README, committed as executable intent, so that the claims
-and the suite cannot silently drift apart. Each becomes a real test in the tier
-that implements the behaviour it defends (see [BUILD-PLAN.md](../docs/BUILD-PLAN.md)).
+The remaining `todo` entries are not placeholders in the pejorative sense.
+They are test list entries committed as executable intent before the code
+they defend existed, so the claims and the suite could never silently drift
+apart during the build.
 
 ### Why `config.test.ts` is not filler
 
@@ -105,6 +117,33 @@ They also pin the invariants the memory design depends on: the ranking weights
 sum to exactly 1, the per-subject cap is meaningfully below the global cap, the
 clearance ladder is strictly ascending (the floor comparison needs a total
 order), and the gate biases toward silence.
+
+## Scenarios — driving the real pipeline with your own data
+
+Everything above proves a rule against the database or a stubbed model — on
+purpose (see "Two rules" below), so none of it needs an API key and none of
+it costs anything to run in CI. It also means none of it shows you the actual
+agent deciding something.
+
+`pnpm scenario <file>` does that instead. Point it at a JSON file describing
+users, chats, and a sequence of messages, and it seeds exactly that, sends
+each message through the same `send_message_and_start_turn()` RPC the app
+uses, and calls `runTurn()` — the same function the message route calls —
+directly. Real gate, real memory retrieval, real Claude call. Two examples
+ship in [`scenarios/`](../scenarios/):
+
+```bash
+pnpm scenario scenarios/memory-isolation.json   # a fact from a private chat, withheld once a second person is present
+pnpm scenario scenarios/clearance-floor.json    # identical membership, different clearance — still doesn't cross
+```
+
+Each prints a line per event as it happens (gate verdict, memory items
+surfaced vs. withheld and why, cost) and the agent's actual reply, so you
+judge the outcome yourself rather than reading a pass/fail. This is a sandbox
+for exploring behaviour, not a CI gate: it spends real API budget, creates
+real (if disposable) accounts, and refuses to run with `NODE_ENV=production`.
+The scenario file shape is documented in the script's own header —
+[`scripts/run-scenario.ts`](../scripts/run-scenario.ts).
 
 ## Two rules for this suite
 

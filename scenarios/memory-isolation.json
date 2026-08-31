@@ -1,0 +1,16 @@
+{
+  "name": "Memory isolation: a fact from Alice's own agent chat is withheld in a group Bob is in",
+  "users": [
+    { "key": "alice", "name": "Alice" },
+    { "key": "bob", "name": "Bob" }
+  ],
+  "chats": [
+    { "key": "solo", "type": "agent", "members": ["alice"] },
+    { "key": "team", "type": "group", "name": "Team", "members": ["alice", "bob"] }
+  ],
+  "turns": [
+    { "chat": "solo", "from": "alice", "message": "I only review contracts on Fridays." },
+    { "chat": "solo", "from": "alice", "message": "When do I review contracts?" },
+    { "chat": "team", "from": "alice", "message": "@quorum when do I review contracts?" }
+  ]
+}

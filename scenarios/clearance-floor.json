@@ -1,0 +1,15 @@
+{
+  "name": "Clearance floor: identical membership, different clearance — the fact still doesn't cross",
+  "users": [
+    { "key": "alice", "name": "Alice", "clearance": "confidential" },
+    { "key": "bob", "name": "Bob", "clearance": "confidential" }
+  ],
+  "chats": [
+    { "key": "exec", "type": "group", "name": "Exec Room", "members": ["alice", "bob"], "clearance": "confidential" },
+    { "key": "general", "type": "group", "name": "General Room", "members": ["alice", "bob"] }
+  ],
+  "turns": [
+    { "chat": "exec", "from": "alice", "message": "@quorum for the record: the acquisition closes March 1st." },
+    { "chat": "general", "from": "alice", "message": "@quorum when does the acquisition close?" }
+  ]
+}

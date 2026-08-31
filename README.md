@@ -186,7 +186,13 @@ under test.
 ## Tests that matter
 
 Not coverage — each one defends a specific claim above. Full list, by file:
-[`tests/README.md`](tests/README.md). The ones that matter most:
+[`tests/README.md`](tests/README.md). Want to see the actual agent decide
+something on data you made up, rather than read a rule proven against the
+database? `pnpm scenario scenarios/memory-isolation.json` drives the real
+pipeline — real gate, real memory retrieval, real Claude call — against a
+scenario file you can edit; see [`tests/README.md`](tests/README.md#scenarios--driving-the-real-pipeline-with-your-own-data).
+
+The ones that matter most:
 
 - **Memory isolation.** An item learned in a DM never surfaces in a group
   containing anyone outside it. An item learned at a higher clearance never
