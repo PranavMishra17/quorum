@@ -133,26 +133,48 @@ though it stays visible in the internal view.
 
 ## Getting started
 
-Requires Node 22+, pnpm 9+, a Supabase project, and an Anthropic API key.
+Requires Node 22+, pnpm 9+, a free [Supabase](https://supabase.com) account,
+and an [Anthropic API key](https://console.anthropic.com). Google OAuth is
+**not** required to get running — see step 4.
 
 ```bash
+# 1. Clone and install
+git clone https://github.com/PranavMishra17/quorum.git
+cd quorum
 pnpm install
-cp .env.example .env.local   # then fill it in — see below
+
+# 2. Create a Supabase project (supabase.com/dashboard -> New project), then
+#    link this repo to it and push the schema — every table and its RLS
+#    policy, all 22 migrations, in one command:
+npx supabase login
+npx supabase link --project-ref YOUR-PROJECT-REF
+npx supabase db push
+
+# 3. Fill in the environment
+cp .env.example .env.local
+#   NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+#   SUPABASE_SECRET_KEY   — Project Settings -> API Keys / Data API
+#   ANTHROPIC_API_KEY     — console.anthropic.com
+
+# 4. Skip Google OAuth for now — enable dev sign-in instead:
+#      ALLOW_DEV_LOGIN=true   in .env.local
+pnpm seed:dev
+
+# 5. Run it
 pnpm dev
 ```
 
-Filling in `.env.local`:
+Open <http://localhost:3000> — the landing page now offers five seeded
+accounts (different clearances, overlapping chats) so you can see both
+authorisation axes without a second browser profile or any Google setup at
+all. Full step-by-step, including the Google OAuth consent screen for when
+you want real sign-in: [`docs/SETUP-SUPABASE.md`](docs/SETUP-SUPABASE.md)
+(~25 min). Deploying your own copy to Vercel:
+[`docs/SETUP-VERCEL.md`](docs/SETUP-VERCEL.md).
 
-- **Supabase** — [`docs/SETUP-SUPABASE.md`](docs/SETUP-SUPABASE.md) (~25 min,
-  mostly Google's OAuth consent screen)
-- **Vercel** — [`docs/SETUP-VERCEL.md`](docs/SETUP-VERCEL.md), only needed to
-  deploy your own copy
-
-**Talking to more than one person without setting up Google OAuth first:** set
-`ALLOW_DEV_LOGIN=true` and run `pnpm seed:dev` — the landing page then offers
-five seeded accounts with different clearances and overlapping chats. Or run
-`pnpm seed:showcase` for the two richer standing accounts described above.
-Both routes are closed by default; see either script's header for exactly how.
+Want the richer, pre-populated world instead of the five bare accounts? Run
+`pnpm seed:showcase` — see "Live at..." above. Both sign-in routes are closed
+by default; see either script's header for exactly how.
 
 Model choice, thinking depth, cost tiers, gate thresholds, memory caps and
 rate limits all live in [`config/`](config/), not scattered through the code.
