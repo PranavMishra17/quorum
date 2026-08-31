@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useOptimistic, useRef, useState, useTransition } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/db/browser';
 import { MessageContent } from './message-content';
@@ -46,16 +46,42 @@ export function ChatSurface({
 }) {
   const router = useRouter();
   const [revoked, setRevoked] = useState(false);
+  /**
+   * One list, in real state.
+   *
+   * This was `useOptimistic`, and that was the bug behind "I send a message and
+   * cannot see it". `useOptimistic` values are scoped to a transition and are
+   * DISCARDED the moment it settles — and the transition here wrapped a
+   * synchronous call, so it settled immediately. The draft appeared for a frame
+   * and vanished, leaving the message's only route to the screen a Realtime
+   * event that (see migration 0015) was never being published.
+   *
+   * A sent message is not speculative: the POST returns its real id. So it goes
+   * into ordinary state and is reconciled by id, which is correct whether
+   * Realtime is working, slow, or switched off entirely.
+   */
   const [messages, setMessages] = useState<UiMessage[]>(initialMessages);
-  const [optimistic, addOptimistic] = useOptimistic(
-    messages,
-    (current, next: UiMessage) => [...current, next],
-  );
-  const [, startTransition] = useTransition();
   const bottomRef = useRef<HTMLDivElement>(null);
-  // clientMessageId -> turnId, for the pending draft before the persisted row
-  // (which carries turn_id itself) arrives over Realtime.
-  const [pendingTurns, setPendingTurns] = useState<Record<string, string>>({});
+
+  /**
+   * Newest persisted `created_at` seen so far — the polling watermark.
+   *
+   * A ref rather than state because the poll reads it and must not be the
+   * reason the interval is rebuilt. Pending drafts are excluded: their
+   * client-side timestamp is ahead of the server's, and adopting it would skip
+   * over rows written in between.
+   */
+  const newestAtRef = useRef<string>(
+    initialMessages.filter((m) => !m.pending).at(-1)?.createdAt ?? new Date(0).toISOString(),
+  );
+
+  useEffect(() => {
+    for (const m of messages) {
+      if (!m.pending && !m.failed && m.createdAt > newestAtRef.current) {
+        newestAtRef.current = m.createdAt;
+      }
+    }
+  }, [messages]);
 
   const eventsByTurn = useMemo(() => {
     const map: Record<string, EventRow[]> = {};
@@ -73,13 +99,13 @@ export function ChatSurface({
   // THAT message, not under the user's — otherwise a spoken reply would show
   // its telemetry twice.
   const turnsWithReply = useMemo(
-    () => new Set(optimistic.filter((m) => m.senderType === 'agent' && m.turnId).map((m) => m.turnId!)),
-    [optimistic],
+    () => new Set(messages.filter((m) => m.senderType === 'agent' && m.turnId).map((m) => m.turnId!)),
+    [messages],
   );
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [optimistic.length]);
+  }, [messages.length]);
 
   /**
    * Realtime, and T11.
@@ -134,6 +160,70 @@ export function ChatSurface({
     };
   }, [chatId, people]);
 
+  /**
+   * Polling fallback — the reason a reply arrives even when Realtime does not.
+   *
+   * Realtime is the fast path, not the correctness path. It can be silent for
+   * reasons the browser cannot detect: a table missing from the publication
+   * (exactly what migration 0015 fixes), a dropped socket, a proxy that killed
+   * an idle WebSocket. `subscribe()` reports SUBSCRIBED in all of those cases,
+   * so there is no error to surface and no retry to trigger — a broken live
+   * feed and a quiet chat look identical.
+   *
+   * A chat where the agent's reply never appears until you reload is broken in
+   * the only way users actually notice, so this closes it cheaply: one indexed
+   * query for rows newer than the newest one already held, every few seconds.
+   * When Realtime is working the poll finds nothing and costs almost nothing;
+   * when it is not, the app still works.
+   */
+  useEffect(() => {
+    const supabase = createClient();
+    let stopped = false;
+
+    async function poll() {
+      // Read the watermark at call time, not from a dependency, so the interval
+      // is created once rather than being torn down on every new message.
+      const since = newestAtRef.current;
+      const { data, error } = await supabase
+        .from('messages')
+        .select('id, sender_type, sender_id, content, created_at, turn_id')
+        .eq('chat_id', chatId)
+        .gt('created_at', since)
+        .order('created_at', { ascending: true })
+        .limit(50);
+
+      if (stopped || error || !data || data.length === 0) return;
+
+      const rows = data as unknown as {
+        id: string; sender_type: 'user' | 'agent'; sender_id: string | null;
+        content: string; created_at: string; turn_id: string;
+      }[];
+
+      setMessages((current) => {
+        const known = new Set(current.map((m) => m.id));
+        const fresh = rows
+          .filter((r) => !known.has(r.id))
+          .map((r) => {
+            const who = r.sender_id ? people[r.sender_id] : undefined;
+            return {
+              id: r.id,
+              senderType: r.sender_type,
+              senderId: r.sender_id,
+              senderName: r.sender_type === 'agent' ? 'Quorum' : who?.name ?? 'Someone',
+              senderColor: who?.color ?? 'var(--agent)',
+              content: r.content,
+              createdAt: r.created_at,
+              turnId: r.turn_id,
+            } satisfies UiMessage;
+          });
+        return fresh.length === 0 ? current : [...current, ...fresh];
+      });
+    }
+
+    const timer = setInterval(() => { void poll(); }, 2_500);
+    return () => { stopped = true; clearInterval(timer); };
+  }, [chatId, people]);
+
   useEffect(() => {
     const supabase = createClient();
     const revocation = supabase
@@ -165,7 +255,7 @@ export function ChatSurface({
         pending: true,
       };
 
-      startTransition(() => addOptimistic(draft));
+      setMessages((current) => [...current, draft]);
 
       try {
         const res = await fetch(`/api/chats/${chatId}/messages`, {
@@ -174,23 +264,29 @@ export function ChatSurface({
           body: JSON.stringify({ content: text, clientMessageId }),
         });
         if (!res.ok) throw new Error(await res.text());
-        // The persisted row arrives over Realtime and replaces the draft there,
-        // so nothing is appended here — appending would double it.
-        //
-        // The turn id arrives here, synchronously, well before the reply does
-        // (the turn runs in after() and may take seconds). Recording it against
-        // the draft is what lets a live trace attach to the user's OWN message
-        // the instant it is sent, rather than only once a reply exists to hang
-        // it on.
-        const json = await res.json().catch(() => null) as { turnId?: string } | null;
-        if (json?.turnId) {
-          setPendingTurns((cur) => ({ ...cur, [clientMessageId]: json.turnId! }));
-        }
+        // The response carries the message's REAL id and turn id, synchronously,
+        // long before the agent's reply exists (the turn runs in after()). So
+        // the draft is promoted here rather than waiting for an event: the
+        // user's own message is confirmed the moment the server confirms it,
+        // with no dependency on Realtime at all.
+        const json = (await res.json().catch(() => null)) as
+          | { messageId?: string; turnId?: string }
+          | null;
+
+        setMessages((current) =>
+          current.map((m) =>
+            m.id === draft.id
+              ? { ...m, id: json?.messageId ?? m.id, turnId: json?.turnId, pending: false }
+              : m,
+          ),
+        );
       } catch {
-        setMessages((current) => [...current, { ...draft, pending: false, failed: true }]);
+        setMessages((current) =>
+          current.map((m) => (m.id === draft.id ? { ...m, pending: false, failed: true } : m)),
+        );
       }
     },
-    [chatId, meId, people, addOptimistic],
+    [chatId, meId, people],
   );
 
   if (revoked) {
@@ -208,12 +304,11 @@ export function ChatSurface({
   return (
     <div className={containerClassName}>
       <div className="flex-1 space-y-4 overflow-y-auto pr-1">
-        {optimistic.length === 0 && (
+        {messages.length === 0 && (
           <p className="py-12 text-center text-sm text-muted">No messages yet.</p>
         )}
-        {optimistic.map((m) => {
-          const pendingId = m.pending && m.id.startsWith('pending:') ? m.id.slice('pending:'.length) : null;
-          const turnId = m.turnId ?? (pendingId ? pendingTurns[pendingId] : undefined);
+        {messages.map((m) => {
+          const turnId = m.turnId;
           // A turn that already produced a spoken reply shows its trace under
           // THAT message. A user's own message only carries the trace while no
           // reply exists yet — still running, or resolved silent.
