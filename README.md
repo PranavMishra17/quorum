@@ -1,283 +1,133 @@
 # Quorum
 
-A multi-user chat workspace where a single AI agent is present in every
-conversation, decides for itself whether it should speak, and learns about the
-people it talks to — **without ever carrying what it learned across an
-authorisation boundary.**
+A shared chat workspace — DMs and group rooms — with one AI teammate present
+everywhere. It decides for itself when a room needs it to speak, and it
+remembers things about the people it works with **without ever using what it
+learned in one room to answer in another where it doesn't belong.**
 
-Built as a take-home for Moritz Legal. TypeScript end to end: Next.js on Vercel,
-Postgres on Supabase.
+TypeScript end to end: Next.js on Vercel, Postgres on Supabase, Claude for the
+agent.
 
 ![Quorum](docs/screenshots/title.png)
 
 > **Live at <https://quorum-rho.vercel.app>.** Sign in with Google, or click
 > straight into one of two standing showcase accounts on the landing page —
 > "Jordan Reyes" and "Morgan Blake" — each with several rooms, one gated by
-> clearance, and memory already built up, no setup required. Verify the
-> claims yourself with [`docs/VERIFY.md`](docs/VERIFY.md) — every check states
-> what to do, what to expect, and what failure looks like.
+> clearance, and memory already built up, no setup required.
 >
 > **Status: built and deployed.** Auth, chats, the response gate, the turn
 > pipeline, memory retrieval and extraction, connectors, admin mode, and the
-> agent internal view are all implemented, with **626 assertions passing**
-> against a real PostgreSQL (34 files, 17 intentionally `todo`). The
-> unauthenticated half of the authorisation story is verified against
-> production; authenticated flows need a human with a Google account and are
-> scripted step-by-step in [`docs/VERIFY.md`](docs/VERIFY.md).
+> agent internal view are all implemented, with **628 assertions passing**
+> against a real PostgreSQL. Verify the claims yourself with
+> [`docs/VERIFY.md`](docs/VERIFY.md) — every check states what to do, what to
+> expect, and what failure looks like.
 
 ---
 
-## The problem the assignment hides
+## Why it's built this way
 
-The brief says:
+I read this less as "add an AI chatbot to a messaging app" and more as: what
+does it take to put an AI teammate inside a real workplace's chat, permanently,
+across every DM and every channel? That framing is what drove almost every
+decision here.
 
-> *The agent learns useful information about users and can use it in future
-> conversations.*
+A workplace is exactly the setting where an AI that remembers things becomes
+dangerous by default. People tell a colleague something in a DM they would
+never say in the all-hands channel — a deadline they're behind on, a concern
+about a deal, a scheduling preference. An assistant that's present everywhere
+and "learns useful things about users for later" will, on the most obvious
+implementation, repeat the DM fact in the all-hands room the moment it seems
+relevant. Nobody asked for that; a naive `user_id → memories[]` store just
+produces it, quietly, and the demo still looks like it works right up until
+it doesn't.
 
-Implemented literally, that is a privacy leak.
+So I made that the actual center of the build: **memory here is an
+authorisation problem, not a retrieval problem.** A fact is checked against
+who was in the room when it was learned and what that room is cleared to see,
+in SQL, before the model ever sees it — not ranked and hoped-for. Everything
+else (which tools the agent has, how polished the UI is) was deliberately
+secondary to getting that one rule right and provably enforced, because it's
+the part that actually matters if this were a real product.
 
-Alice tells the agent something in a DM. The agent stores it against Alice.
-Alice later speaks in a twelve-person group. The agent retrieves what it knows
-about Alice — including the thing she said in confidence to a two-person
-conversation — and uses it in front of eleven people who were never party to it.
+The write-ups of *how* — the exact rule, the two authorisation axes, every
+tradeoff and the argument against it — live in
+[`docs/DECISIONS.md`](docs/DECISIONS.md) and
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) rather than repeated here; this
+file stays a working overview.
 
-Nothing in the requirement warns you about this. A naive `user_id → memories[]`
-schema produces it by default, and the resulting demo looks like it works.
+## The rule memory follows
 
-**Noticing this is most of the exercise.** The rest of this README is largely
-about the rule that closes it.
+> A fact learned in chat **C1** may surface in chat **C2** only if every active
+> member of C2 was present when it was learned, **and** C2 is cleared for it.
+> Both conditions, evaluated in SQL, before anything is ranked.
 
-## The surfacing rule
+Two things worth knowing about it:
 
-> A memory item learned in chat **C1** may surface in chat **C2** only if:
->
-> 1. **Audience containment** — every active member of C2 was in the audience
->    snapshot taken when the item was learned. The audience may narrow, never
->    widen.
-> 2. **Clearance floor** — C2's clearance level is **>=** the level recorded on
->    the item.
->
-> Both conditions. Always. Evaluated in SQL, before ranking.
+- **It fails closed on purpose in the one case that would otherwise fail
+  open.** "Every member of C2 was in the audience" is vacuously true for a
+  room with zero members — so an emptied-out chat has to explicitly return
+  nothing, or it would match everything. There's a test for exactly this.
+- **The model never receives out-of-scope memory at all.** It isn't asked to
+  keep a secret; it's never handed the secret. Structural, not a prompt.
 
-**Why condition 2 is not redundant.** The same set of people can share both a
-level-3 *Internal Exec* group and a level-0 general group. Audience containment
-alone is satisfied in both directions — so a fact learned in the exec channel
-would be free to surface in the general channel. Clearance is the axis that
-stops it. Membership answers *who*; clearance answers *in what capacity*.
-
-Properties worth stating plainly:
-
-- **It fails closed — but only because one case is handled explicitly.**
-  "Every active member of C2 was in the audience snapshot" is *vacuously true*
-  when C2 has no active members, in SQL (`NOT EXISTS`) and in JavaScript
-  (`Array.every`) alike. Implemented naively, a fully vacated chat therefore
-  passes containment for **every memory item in the system** — the exact leak
-  this project exists to prevent, arriving through the front door of its own
-  central rule. Zero active members returns zero items, asserted by a test.
-- **It is cheap.** An anti-join over the audience snapshot plus an integer
-  comparison — both indexed, both in the same query as the fetch.
-- **It is testable.** The isolation tests below are the ones that prove the thesis.
-- **The model never receives out-of-scope memory at all.** It cannot leak what
-  it was never given. This is structural prevention, not a prompt asking the
-  model to be discreet.
-
-That last property is the thesis, and it holds — with one bound worth stating
-plainly rather than burying. The audience half is *absolutely* structural:
-`memory_audience` is immutable once written, so there is nothing to race. The
-clearance half is **bounded, not absolute**: membership and clearance are live
-state, and no design that keeps the model call outside a database transaction
-can stop a response being generated from data that went stale mid-turn. The
-guarantee is that a revocation takes effect on the **next privileged read**, not
-that an in-flight turn is retroactively corrected. See
-[D-009](docs/DECISIONS.md).
-
-A second, more fundamental limit: item-level filtering does not defend against a
-human aggregating two separately-authorised answers into a third, unauthorised
-inference. No system surveyed claims to solve this.
-
-### Retrieval order, and why the order is the design
-
-In a twenty-person group, loading every member's memory is wrong on cost,
-latency, and precision. Retrieval runs:
-
-```
-1. FILTER   audience containment + clearance floor  — in SQL, before anything else
-2. RANK     lexical relevance (ts_rank), recency, speaker presence in recent turns
-3. CAP      a global item budget AND a per-subject cap
-4. LOG      retrieved count and filtered-out count -> agent_events
-```
-
-**Ranking is lexical, not semantic, and that is a deliberate cut.** Anthropic
-ships no embeddings API, so semantic ranking would mean a second vendor, a second
-key, and a re-embedding migration path — none of which the twelve-hour budget
-justified for a candidate set that the authorisation filter has already reduced
-to tens of items. `lib/memory/embed.ts` exists as an unimplemented interface so
-the upgrade is a one-file change. The honest weakness: lexical matching misses
-paraphrase, which in a legal product is exactly the gap embeddings exist to
-close. See [D-004](docs/DECISIONS.md).
-
-The critical property is that step 1 precedes step 2. Retrieving the top 20 by
-relevance and then discarding the unauthorised ones is a different program with
-the same output most of the time — and a leak the rest of the time.
-Authorisation is not a relevance-ranking problem.
-
-The per-subject cap in step 3 exists so one heavily-discussed person cannot
-crowd out the other nineteen.
-
----
+Retrieval itself is filter, then rank, then cap — in that order, always,
+because ranking the top 20 by relevance and discarding the unauthorised ones
+afterward is a different program with the same output most of the time, and a
+leak the rest of the time. Full detail, including what this doesn't solve
+(no semantic ranking, no defence against a human combining two separately-fine
+answers): [`docs/MEMORY.md`](docs/MEMORY.md).
 
 ## Authorisation: two independent axes
 
-Both must pass, on every read.
+**Membership** (are you in this chat?) and **clearance** (are you cleared for
+this kind of chat?) are checked separately, both in SQL, on every read. A
+chat gated at *Confidential* is unreachable without that clearance level
+regardless of any membership row — which is exactly what makes the clearance
+half of the memory rule meaningful rather than redundant.
 
-| Axis | Question | Mechanism |
-|---|---|---|
-| **Membership** | Is this user in this chat? | `chat_members.status = 'member'` |
-| **Clearance** | Is this user badged for this kind of chat? | user's grants vs `chats.required_clearance_id` |
-
-A gated group is unreachable by a user without **sufficient clearance level**,
-regardless of any membership row. The axes are independent by construction,
-which is exactly what makes the clearance floor meaningful in the memory rule.
-
-The precision matters: clearance is a **monotone integer ladder** —
-`general(0) / internal(1) / confidential(2) / restricted(3)` — so a user holding
-a *higher* level satisfies a *lower* requirement without holding that specific
-key.
-
-The ladder measures exactly one thing: **how sensitive the material is.** An
-earlier version had rungs named for teams (`external_audit`, `internal_exec`),
-which quietly conflated two dimensions — a team name describes *who is in the
-room*, not *how sensitive the content is* — and produced a real bug, where an
-`internal` fact was eligible to surface into an `external_audit` chat purely
-because 2 > 1. Teams are what `chat_members` models. See
-[D-023](docs/DECISIONS.md).
-
-The honest limit: real clearance systems are lattices, not ladders, so that
-"Secret, Project A" does not imply "Secret, Project B". Quorum's ladder does not
-model compartmentalisation and does not pretend to.
-
-### Enforced at the data layer
-
-Row-level security is on for **every** table, written in the same migration that
-creates the table. The publishable Supabase key ships in the browser bundle; it
-is only safe because RLS is what actually stops the query. Client-side checks
-exist for UX and are never the sole guard.
-
-Memory tables are stricter still: **no client access at all.** Postgres has no
-"deny" policy — access is *granted* by at least one `PERMISSIVE` policy and
-narrowed by `RESTRICTIVE` ones. So the construction is: RLS enabled, **no
-permissive policy written at all**, and `SELECT`/`INSERT`/`UPDATE`/`DELETE`
-revoked from `anon` and `authenticated`. With no policy to grant access, no row
-is visible. Memory is reachable only through the server-side scoped path.
-
-### The agent is the dangerous actor
-
-The agent runs server-side and needs to read across chats to do its job. That
-makes it the single most likely path to a leak, so it never holds an unscoped
-service-role client in the request path.
-
-`ScopedAgentContext` is constructed once per turn from a chat id. It fixes the
-turn's **identity** — the chat, the acting user, the `turn_id` — and every agent
-read of memory, files, or message history goes through it, applying both
-authorisation axes in SQL before returning anything.
-
-What it deliberately does **not** do is cache the member set or the clearance
-level. An earlier draft of this document said it "resolves and holds" them, and
-that was wrong in an instructive way: holding authorisation state across a
-multi-second model call *is* the time-of-check/time-of-use gap. Membership and
-clearance are therefore re-read, in SQL, at the moment of each privileged read.
-This costs essentially nothing — every PostgREST call is already its own
-transaction — and the alternative (wrapping a whole turn in one long
-transaction) is worse on every axis: it holds a database connection open across
-an external API call, and it fights connection pooling by design.
-
-**A class is not a security boundary.** The honest version of this claim is four
-layers, and only the middle two are enforcement:
-
-1. *Convention* — one documented read path (`CLAUDE.md` non-negotiable #2).
-2. **Application** — the context is the only place the service-role key is read.
-3. **Database** — RLS means a bug in layer 2 still cannot cross a tenant.
-4. *Tests* — a context built for chat A returns nothing belonging to chat B.
-
-Layers 1 and 4 catch mistakes. Layer 3 is what survives them. If asked *"why RLS
-when you already have application authorisation?"*: defence in depth —
-application logic controls behaviour *intentionally*; RLS ensures an
-unintentional bug does not become cross-tenant data access.
-
----
+Row-level security is on for every table, in the migration that creates it —
+the browser holds a publishable key, and RLS is the only reason that's safe.
+Memory tables go further: no client policy at all, reachable only through a
+server-side scoped path (`ScopedAgentContext`) that re-checks both axes on
+every privileged read rather than caching them across a model call — caching
+them is the time-of-check/time-of-use gap this design exists to avoid. Full
+argument, including the four-layer "a class is not a security boundary"
+breakdown: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## When the agent speaks
 
-The agent is present everywhere and must decide whether to respond. Hybrid:
-a deterministic chain first, a model judge only for genuine ambiguity.
+Present in every room, silent by default. A deterministic chain handles the
+obvious cases first (never reply to itself; always reply in a 1:1 with it;
+reply when mentioned or replied to; stay quiet in an unaddressed DM or within
+its own cooldown) and only falls through to a model judge for genuine
+ambiguity — one biased toward silence, because an assistant that occasionally
+misses a moment is far less annoying than one that never shuts up. Every
+decision, including every silent one, is logged.
 
-Evaluated in order, first match wins:
-
-| # | Condition | Verdict |
-|---|---|---|
-| 1 | Sender is the agent itself | **silent** — loop guard, non-negotiable |
-| 2 | Chat type is `agent` | **respond** — this is a direct conversation |
-| 3 | Message mentions the agent | **respond** |
-| 4 | Message replies to an agent message | **respond** |
-| 5 | Two-human DM, agent not addressed | **silent** — present, but not a participant |
-| 6 | Agent spoke within the cooldown, nothing new directed at it | **silent** |
-| — | anything else | model judge |
-
-The judge returns a verdict plus a one-line reason, and is **biased toward
-silence**: an agent that stays quiet slightly too often is far better than one
-that interjects constantly, and the failure modes are not symmetric. Judge
-errors and timeouts also resolve to silence.
-
-Every evaluation writes a `gate_evaluated` event carrying the verdict, which
-rule fired, and the reason. Rate limiting sits above all of it.
-
-## The agent internal view
-
-Each chat exposes an append-only log of everything the agent did: gate decisions
-and why, memory reads *including how many items the filter removed*, memory
-writes, conflicts and how they resolved, tool calls and results, context dropped
-for budget reasons, and token spend per call.
-
-This is deliberately the most prominent feature after the chat itself. A memory
-isolation rule you cannot see working is indistinguishable from one that does
-not work.
+That log is the **agent internal view** — per chat, per turn: which rule
+fired, how many memory items were retrieved and how many were filtered out,
+every tool call, every token spent. It's the most prominent feature after the
+chat itself, because a memory-isolation rule you can't see working is
+indistinguishable from one that isn't.
 
 ## Tools and untrusted content
 
-File and web tools put attacker-controlled text into the model's context. The
-claim this project makes about that is deliberately narrow:
+File and web tools put text the agent didn't write into its context — a
+document, a search result, an email. That text is treated as data, wrapped
+with explicit provenance, never as instructions. The actual boundary against
+prompt injection isn't the wrapping (delimiter-style defences are beaten by
+adaptive attacks the overwhelming majority of the time in the literature) —
+it's that **once a turn has read untrusted content, it can't make another
+externally-observable call for the rest of that turn**, enforced in code, not
+asked of the model.
 
-> Tool output — file contents, search results — is untrusted **data**. It reaches
-> the model only inside a fenced, JSON-encoded `tool_result` block carrying
-> explicit provenance, and **a turn that has ingested untrusted tool content
-> cannot make a further externally-observable tool call outside a fixed
-> allowlist resolved outside model control.** The fence raises the cost of an
-> opportunistic attack; it is not a security boundary and is not claimed as one.
-> The boundary is the privilege rule, because that one is enforced in code
-> rather than in English.
-
-The reason for the narrowness: when twelve published injection defences were
-tested against *adaptive* attackers rather than static benchmarks, defences
-reporting near-zero attack success rates fell above 90%, with prompting-based
-defences — which is exactly what a delimiter is — at 95–99%. So "we are
-protected against prompt injection" is not a sentence anyone can honestly write,
-and it appears nowhere in this repository.
-
-One consequence is specific to a system that *remembers*, and it is worth
-stating because the general literature does not cover it. Extraction runs on the
-model's own reply, so an injected instruction that makes the model assert a false
-fact about a user would plant that lie into memory — correctly authorised,
-surfacing indefinitely. Anything extracted from a turn that touched untrusted
-content is therefore forced to `inferred` and below the confidence threshold, so
-it lands as `candidate` and is never retrieved, while staying visible in the
-internal view.
-
----
-
-## How memory works
-
-Storage, extraction, retrieval, contradiction handling, lifecycle, and what it
-deliberately does not solve: **[`docs/MEMORY.md`](docs/MEMORY.md)**.
+One consequence specific to a system that remembers, worth calling out because
+general injection write-ups don't cover it: extraction runs on the model's own
+reply, so a document that tricks the model into asserting something false
+about a user would otherwise plant that lie into memory, correctly authorised,
+forever. Anything extracted from a turn that touched untrusted content is
+therefore capped below the confidence threshold — it never gets retrieved,
+though it stays visible in the internal view.
 
 ---
 
@@ -291,45 +141,39 @@ cp .env.example .env.local   # then fill it in — see below
 pnpm dev
 ```
 
-Filling in `.env.local`, in exact steps:
+Filling in `.env.local`:
 
 - **Supabase** — [`docs/SETUP-SUPABASE.md`](docs/SETUP-SUPABASE.md) (~25 min,
   mostly Google's OAuth consent screen)
 - **Vercel** — [`docs/SETUP-VERCEL.md`](docs/SETUP-VERCEL.md), only needed to
-  deploy your own copy rather than run it locally
+  deploy your own copy
 
-**Talking to more than one person without setting up Google OAuth first:**
-set `ALLOW_DEV_LOGIN=true` in `.env.local` and run `pnpm seed:dev`. The
-landing page then offers five seeded accounts (`alice`…`erin`) with different
-clearances and overlapping chats — enough to see both authorisation axes and
-the memory surfacing rule without a second browser profile. This route is
-closed by three independent checks the moment `NODE_ENV=production`; see
-`app/auth/dev/route.ts`.
+**Talking to more than one person without setting up Google OAuth first:** set
+`ALLOW_DEV_LOGIN=true` and run `pnpm seed:dev` — the landing page then offers
+five seeded accounts with different clearances and overlapping chats. Or run
+`pnpm seed:showcase` for the two richer standing accounts described above.
+Both routes are closed by default; see either script's header for exactly how.
 
-Model selection, thinking depth, cost tiers, gate thresholds, memory caps and
-rate limits all live in [`config/`](config/) — not scattered through the code.
+Model choice, thinking depth, cost tiers, gate thresholds, memory caps and
+rate limits all live in [`config/`](config/), not scattered through the code.
 
-**Verifying the claims, not just running the app:**
+**Verifying it, not just running it:**
 
 ```bash
 pnpm check    # boundaries + lint + test — the same gate CI runs
-pnpm test     # 626 assertions, including the full authorisation/memory suite
+pnpm test     # 628 assertions, including the full authorisation/memory suite
 ```
 
-`pnpm test` provisions its own real PostgreSQL 18.4 automatically — no Docker,
-no `DATABASE_URL` to set by hand. `tests/global-setup.ts` starts genuine
-Postgres binaries via `embedded-postgres` the first time it runs (a few
-seconds), then reuses that instance on later runs. This matters: an in-JS
-Postgres emulator would not implement row-level security, and RLS is the thing
-under test — a harness that cannot enforce a policy cannot verify one. If
-`TEST_DATABASE_URL` is already set (CI, or your own `supabase start`), that
-database is used instead.
+`pnpm test` provisions its own real PostgreSQL automatically (via
+`embedded-postgres` — no Docker, nothing to configure) because an in-JS
+Postgres emulator wouldn't implement row-level security, and RLS is the thing
+under test.
 
 ---
 
 ## What it looks like
 
-**Workspace** — the People/Groups directory, with the Q tile:
+**Workspace** — the People/Groups directory:
 
 ![Workspace](docs/screenshots/workspace.png)
 
@@ -341,139 +185,64 @@ database is used instead.
 
 ## Tests that matter
 
-The brief asks for the tests *considered important*, not for coverage. These are
-chosen so that each one defends a claim this README makes.
+Not coverage — each one defends a specific claim above. Full list, by file:
+[`tests/README.md`](tests/README.md). The ones that matter most:
 
-**Authorisation**
-- A non-member cannot read a chat, its messages, its events, or its files.
-- A member without sufficient clearance cannot read a clearance-gated chat.
-- A removed member's next query returns nothing (row level, via RLS).
-- A removal landing *mid-turn* takes effect on the agent's next privileged read
-  (turn level). Split from the row-level case deliberately: one test alone
-  cannot distinguish "access revoked" from "a cache that happens to be cold".
-- A `requested` membership row grants no read access.
-- A non-admin cannot add, remove, or promote members.
+- **Memory isolation.** An item learned in a DM never surfaces in a group
+  containing anyone outside it. An item learned at a higher clearance never
+  surfaces in a lower-clearance room, even with an *identical* member list —
+  proving the clearance axis isn't redundant with membership. A
+  `ScopedAgentContext` built for one chat returns nothing from another.
+- **Authorisation.** A non-member reads nothing — no messages, no roster, no
+  files. A removed member's next read returns nothing; a removal landing
+  mid-turn takes effect on the agent's *next* privileged read (tested
+  separately, because one test alone can't distinguish "revoked" from "a
+  cache that's merely cold").
+- **Agent behaviour**, against a stubbed provider so the suite needs no API
+  key: never replies to itself, always replies when mentioned, the judge only
+  runs when the deterministic chain falls through, and a judge error or
+  timeout resolves to silence rather than a guess.
+- **Memory lifecycle.** A stated fact supersedes a conflicting inferred one; a
+  superseded or below-threshold item is never retrieved.
 
-**Memory isolation — the tests that prove the thesis**
-- An item learned in a DM does not surface in a group containing anyone outside
-  that DM.
-- An item learned in a level-3 chat does not surface in a level-0 chat with an
-  *identical member set*.
-- An item does surface in a chat whose members are a strict subset of the
-  original audience.
-- A user who joins a group *after* an item was learned neither causes that item
-  to be excluded elsewhere, nor gains access to it.
-- A `ScopedAgentContext` built for chat A returns nothing belonging to chat B.
+## Decisions, assumptions, and what I'd do next
 
-**Agent behaviour** — against a stubbed provider, so the suite needs no API key
-- The agent never responds to its own message.
-- The agent responds when mentioned, and a mention overrides the cooldown.
-- The cooldown suppresses a rapid second response.
-- The judge is invoked *only* when the deterministic chain falls through.
-- A judge error, timeout, or malformed verdict resolves to silence.
+Where the requirements were genuinely open, I picked a reading and said so
+rather than guessing silently — the full list, with the reasoning and the
+counter-argument for each, is in
+[`docs/DECISIONS.md`](docs/DECISIONS.md). The ones that shape the product
+most: a solo `agent` chat type exists so the assistant can be addressed
+directly; a removed member loses access on their *next* read rather than
+retroactively (Realtime can't be revoked mid-socket, only closed on their
+next request); memory audience is a snapshot at learn time, never
+re-evaluated against current membership; clearance is one sensitivity
+dimension, not a full entitlement lattice.
 
-> These test the **pipeline** — which rule fired, and whether the fail-closed
-> paths hold — not the judge's accuracy at deciding whether an unaddressed
-> remark deserves a reply. That is a genuinely hard task, the one relevant
-> benchmark suggests a zero-shot text-only model would be mediocre at it, and
-> measuring it properly needs a labelled corpus this budget does not have. The
-> honest claim is that the agent's *silence* is guaranteed by deterministic
-> rules and its *speech* is a judgement call that is logged and inspectable.
+**Cut, deliberately, and why:** no knowledge graph — tested against the bar
+"name three product queries a graph answers better than a flat table," and it
+cleared one and a half, not three (full argument in
+[D-007](docs/DECISIONS.md)); no semantic/embedding ranking, since Anthropic
+ships no embeddings API and the authorisation filter already narrows the
+candidate set to tens of items before ranking matters ([D-004](docs/DECISIONS.md));
+no force-directed space view — the least-graded, most decorative piece,
+scheduled last and never reached.
 
-**Memory lifecycle**
-- A directly stated fact supersedes a conflicting inferred fact.
-- A superseded item is not retrieved.
-- A candidate item below the confidence threshold is not retrieved.
+**What shipped beyond the original plan:** read-only Gmail/Calendar
+connectors, a self-service admin mode for demonstrating both authorisation
+axes from one browser, a subject-access memory page (what the agent knows
+about *you*, specifically — a different question from what it may repeat in
+a given room), a seeded demo world so the withholding claim is something you
+can watch happen, and the two showcase accounts above.
 
-**Tools**
-- A file uploaded in chat A is not retrievable from chat B.
+**With more time:** semantic ranking (an embeddings provider is a one-file
+swap away, `lib/memory/embed.ts`), the space view, and closing the last gap in
+D-009 — an in-flight turn can't be retroactively corrected if authorisation
+changes mid-call, only the *next* one is guaranteed correct.
 
 ---
 
-## Assumptions
+## AI tooling
 
-Recorded because each one is a defensible reading of an under-specified
-requirement, not because each one is obviously correct.
-
-1. **An `agent` chat type exists with a single human member.** This extends the
-   stated minimum of two users per chat. It exists so the agent can be addressed
-   directly with different gate behaviour.
-2. **Removed members lose access to history on their next read.** The
-   Slack-style alternative — retaining previously visible history — is equally
-   defensible; the stricter reading was chosen deliberately.
-
-   "Next read", not "the moment of removal", and the difference is not
-   pedantry. Supabase Realtime evaluates RLS when a subscription is established
-   and caches that result for the socket's lifetime, so a removed member
-   holding an **already-open subscription** would keep receiving new messages
-   until the socket dropped.
-
-   Removal now broadcasts a revocation to that user, and their client tears
-   down its subscriptions on receipt — which narrows the window from "until the
-   socket drops" to "within a round trip". It is worth being precise about what
-   that is: **cooperative, not enforcement.** The teardown runs in the browser
-   being revoked, so a modified client could ignore it and keep receiving new
-   messages on that one channel until the socket closed. Every other read —
-   history, roster, files, memory — is refused immediately by RLS. Closing the
-   window properly needs server-side socket termination, which Supabase does
-   not currently expose. Hence the guarantee stated here is the honest one:
-   **access ends on the next read.**
-3. **Memory audience is a snapshot at learn time, not current membership.**
-   Someone who joins later was not present when the thing was said.
-4. **Memory visibility never widens automatically.** Broadening requires an
-   explicit act by the subject.
-5. **Clearances are an integer level plus a named key, measuring sensitivity
-   only** — enough to demonstrate the authorisation axis without modelling a real
-   entitlement system. Not a lattice; no compartmentalisation.
-6. **Google is the only auth provider.** Authentication was explicitly permitted
-   to be simplified; authorisation is where the effort went.
-7. **The gate biases toward silence when uncertain.**
-
-## Tradeoffs and what comes next
-
-Deliberate cuts, against the finished build:
-
-- **No knowledge graph.** `memory_nodes` / `memory_edges` were designed and then
-  cut, and the cut was tested rather than assumed. The bar set was: *name three
-  product queries a graph answers well and a flat relational table answers
-  badly.* One turned out to be answered **better** without a graph (single-hop
-  subject lookup — Mem0's own benchmark). One is real but is not a requirement of
-  this product (multi-hop provenance). One — temporal "how did this change" — is
-  genuinely where graphs win in the literature, and Quorum already answers it
-  relationally through the `superseded_by` chain. Looking for three and finding
-  one and a half is the argument for cutting.
-  **Reopen triggers, stated so the decision is falsifiable:** a product
-  requirement for branching provenance (a fact derived from two others, which
-  `superseded_by` cannot express), or a "trace this instruction back to who
-  authorised it" feature — plausible for a legal product.
-- **No embedding provider.** Ranking is lexical (`ts_rank`) plus recency plus
-  speaker presence, not semantic similarity — see [D-004](docs/DECISIONS.md)
-  above. `lib/memory/embed.ts` ships as an unimplemented interface so adding
-  one later is a one-file change, not a schema change.
-- **The force-directed space view was never built.** It was scheduled last on
-  purpose — the most visually impressive piece and the least graded — and the
-  12-hour budget did not reach it. A list-and-detail view (Rooms) ships instead
-  and is the only conversation view; there is no second, richer one waiting
-  behind a flag.
-- **Partial-turn resume is out of scope.** A retry that arrives after the
-  model call already succeeded and was already billed, but before the reply
-  was persisted, is not handled — stated as a limit rather than left looking
-  like an oversight. See [D-011](docs/DECISIONS.md).
-
-What shipped beyond the original Tier-1/2 scope: read-only Gmail and Calendar
-connectors (gated per-user, behind the same authorisation context every other
-agent read goes through), a self-service admin mode for demonstrating both
-authorisation axes from one browser, a subject-access memory page (what the
-agent has learned about *you*, specifically), a seeded two-room demo world so
-the memory-withholding claim is something a reviewer can watch happen rather
-than take on faith, and two standing showcase accounts — "Jordan Reyes" and
-"Morgan Blake" — with a richer, pre-built world (several rooms, one gated by
-clearance, memory already written) offered directly on the landing page for
-anyone to try with no setup. Run `pnpm seed:showcase` to build them on your
-own project; see `.env.example` for `SHOWCASE_ACCOUNT_PASSWORD`.
-
-## On AI tooling
-
-How AI tools were used, which parts were generated versus hand-written, and how
-the output was checked: [`docs/AI-USAGE.md`](docs/AI-USAGE.md), kept as a running
-log rather than reconstructed at the end.
+How AI tools were used, what was generated versus hand-written, and how the
+output was checked, as a running log rather than reconstructed after the
+fact: [`docs/AI-USAGE.md`](docs/AI-USAGE.md).

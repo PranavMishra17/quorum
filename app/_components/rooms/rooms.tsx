@@ -8,6 +8,7 @@ import { ClearanceStamp } from '../clearance';
 import { DemoStamp } from '../demo-stamp';
 import { Roster, type RosterMember } from '../roster';
 import { InternalView } from '../internal-view';
+import { showcaseSuggestionKind } from '@/lib/demo/suggestions';
 import type { EventRow, CallRow } from '../event-trace';
 
 export interface RoomSummary {
@@ -325,7 +326,9 @@ function RoomPane({ room, meId }: { room: RoomSummary; meId: string }) {
                 initialEvents={data.events}
                 initialCalls={data.calls}
                 containerClassName="flex h-full min-h-0 flex-col"
-                demoKind={room.demoKind}
+                // Showcase rooms are ordinary chats (not `is_demo`), keyed by
+                // their fixed name instead of `chats.demo_kind`.
+                demoKind={room.demoKind ?? showcaseSuggestionKind(room.name)}
               />
               {room.type !== 'agent' && (
                 <Roster
