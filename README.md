@@ -8,6 +8,8 @@ authorisation boundary.**
 Built as a take-home for Moritz Legal. TypeScript end to end: Next.js on Vercel,
 Postgres on Supabase.
 
+![Quorum](docs/screenshots/title.png)
+
 > **Live at <https://quorum-rho.vercel.app>.** Sign in with Google, or — since
 > demonstrating authorisation needs several identities in the same room at
 > once — with one of the seeded accounts on the landing page when dev sign-in
@@ -326,25 +328,13 @@ database is used instead.
 
 ## What it looks like
 
-Screenshots from a running instance — replace the placeholders below with your
-own by signing in (dev login is fastest, see above) and capturing each view:
+**Workspace** — the People/Groups directory, with the Q tile:
 
-| View | What to capture |
-|---|---|
-| `docs/screenshots/workspace.png` | `/chats` — the People/Groups directory, with the Q tile |
-| `docs/screenshots/rooms.png` | `/people` — a room open, roster visible, agent internal view expanded |
-| `docs/screenshots/memory.png` | `/memory` — the subject-access view, showing an item withheld from one room |
-| `docs/screenshots/capabilities.png` | `/connectors` — the Capabilities page listing every tool the agent can call |
-
-```markdown
 ![Workspace](docs/screenshots/workspace.png)
-![Rooms, with the agent internal view open](docs/screenshots/rooms.png)
-![Memory subject-access page](docs/screenshots/memory.png)
-![Capabilities page](docs/screenshots/capabilities.png)
-```
 
-Until those are captured, the fastest way to see the actual UI is the deployed
-build itself: <https://quorum-rho.vercel.app>.
+**Rooms** — a room open, roster visible, agent internal view expanded:
+
+![Rooms, with the agent internal view open](docs/screenshots/rooms.png)
 
 ---
 
