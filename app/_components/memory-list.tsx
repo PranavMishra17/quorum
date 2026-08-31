@@ -112,7 +112,7 @@ function MemoryRow({ item }: { item: EnrichedMemoryItem }) {
       <p className="mt-2 text-xs text-muted">
         Learned in{' '}
         {item.originChatKnown ? (
-          <a href={`/chat/${item.originChatId}`} className="underline underline-offset-2 hover:text-foreground">
+          <a href={`/people?open=${item.originChatId}`} className="underline underline-offset-2 hover:text-foreground">
             {item.originChatName ?? 'a chat'}
           </a>
         ) : (

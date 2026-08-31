@@ -9,7 +9,7 @@ import { Redacted } from './_components/clearance';
 export const metadata = {
   title: 'Quorum',
   description:
-    'A chat workspace where one agent is present everywhere, decides for itself whether to speak, and never carries what it learns across an authorisation boundary.',
+    'A chat workspace with one agent in every conversation. It decides for itself when to speak, and what it learns in one room never turns up in another.',
 };
 
 /**
@@ -39,30 +39,35 @@ export default async function Landing() {
       <div className="mt-10 grid gap-14 lg:grid-cols-[1.15fr_20rem] lg:gap-16">
         <div>
           <h1 className="max-w-2xl font-display text-4xl font-semibold leading-[1.08] sm:text-5xl">
-            One agent in every conversation. It never repeats what it learned in
-            a room you were not in.
+            One agent, in every room. What it learns with you stays with you.
           </h1>
+          <p className="mt-4 max-w-xl text-sm leading-relaxed text-muted">
+            Quorum sits in every direct message and group chat, watching
+            quietly and speaking when it has something worth saying. Tell it
+            something in private, and it remembers it in private — the fact
+            never turns up somewhere the people who should know about it
+            weren&rsquo;t in the room to hear it.
+          </p>
 
           <Demonstration />
 
           <div className="mt-12 grid max-w-3xl gap-8 sm:grid-cols-2">
             <div>
-              <h2 className="label mb-2 text-foreground">The leak the brief invites</h2>
+              <h2 className="label mb-2 text-foreground">Say it once, where it belongs</h2>
               <p className="text-sm leading-relaxed text-muted">
-                &ldquo;The agent learns about users and can use it in future
-                conversations.&rdquo; Taken literally, something told in a DM
-                becomes usable in a group of twelve. A naive schema produces
-                that by default — and the demo still looks like it works.
+                Mention your schedule in a DM and the agent can act on it next
+                time you talk. Say it in a group instead, and it stays scoped
+                to that group. Nothing you tell it in one conversation quietly
+                becomes something it happens to know in another.
               </p>
             </div>
             <div>
-              <h2 className="label mb-2 text-foreground">The rule that closes it</h2>
+              <h2 className="label mb-2 text-foreground">Checked every time, not just once</h2>
               <p className="text-sm leading-relaxed text-muted">
-                A memory may surface in another chat only if every active member
-                of that chat was present when it was learned, <em>and</em> that
-                chat&rsquo;s clearance is at least as high. Both conditions,
-                evaluated in SQL before ranking — so the model never receives
-                what it must not repeat.
+                Before the agent brings anything up, it checks who is actually
+                in the room right now and what they&rsquo;re cleared to see —
+                on every reply, not only when the fact was first learned. Leave
+                a room, and it stops seeing you in it immediately.
               </p>
             </div>
           </div>
@@ -72,8 +77,7 @@ export default async function Landing() {
           <div className="border border-border bg-surface p-6">
             <h2 className="label mb-1 text-foreground">Sign in</h2>
             <p className="mb-6 text-xs leading-relaxed text-muted">
-              Authentication is deliberately simple. Authorisation is where the
-              work went.
+              One click, and you&rsquo;re in a room with the agent.
             </p>
             <SignIn
               devEnabled={devLoginEnabled()}

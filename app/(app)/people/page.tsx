@@ -28,7 +28,12 @@ export const metadata = { title: 'Rooms' };
  * than "unread", because a number that means something slightly different from
  * its label is worse than a longer label.
  */
-export default async function RoomsPage() {
+export default async function RoomsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ open?: string }>;
+}) {
+  const { open } = await searchParams;
   const actor = await requireActor();
   const supabase = await createClient();
 
@@ -139,5 +144,5 @@ export default async function RoomsPage() {
     return bt.localeCompare(at);
   });
 
-  return <Rooms rooms={rooms} meId={actor.id} />;
+  return <Rooms rooms={rooms} meId={actor.id} initialSelected={open ?? null} />;
 }

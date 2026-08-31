@@ -91,7 +91,7 @@ export function NewChat({
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? 'could not create the group');
-      router.push(`/chat/${body.chatId}`);
+      router.push(`/people?open=${body.chatId}`);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'could not create the group');

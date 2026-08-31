@@ -91,7 +91,7 @@ often *in what capacity* someone is present.
 
 ---
 
-## D-004 — Embedding provider — **OPEN**
+## D-004 — Embedding provider — **CLOSED**
 
 **Context.** The retrieval design ranks by semantic similarity, which needs
 embeddings. **Anthropic does not ship an embeddings API.** The spec assumed a
@@ -164,7 +164,7 @@ to them or spuriously exclude the item everywhere.
 
 ---
 
-## D-007 — Graph memory — **OPEN, provisionally cut**
+## D-007 — Graph memory — **CLOSED, cut**
 
 **Context.** The original design had `memory_nodes` and `memory_edges` giving
 graph semantics inside Postgres, with per-hop authorisation filtering.
@@ -227,7 +227,7 @@ annoyance, an over-eager one is unusable.
 
 ---
 
-## D-009 — Authorisation consistency mid-turn — **OPEN**
+## D-009 — Authorisation consistency mid-turn — **CLOSED**
 
 **Context.** An agent turn is not instantaneous. If an admin removes a member at
 t+2s and memory retrieval runs at t+3s, what should the agent see? Classic

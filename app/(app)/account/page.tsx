@@ -162,7 +162,7 @@ export default async function AccountPage() {
             {groups.map((g) => (
               <li key={g.chat.id}>
                 <Link
-                  href={`/chat/${g.chat.id}`}
+                  href={`/people?open=${g.chat.id}`}
                   className="flex items-center gap-3 border border-border bg-surface px-4 py-3 transition hover:border-border-strong"
                 >
                   <span className="min-w-0 flex-1">

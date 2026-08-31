@@ -197,9 +197,9 @@ export function FloatingPanelWindow({ panel }: { panel: PanelState }) {
           {data !== 'loading' && data !== 'error' && data.isDemo && <DemoStamp />}
         </span>
         <Link
-          href={`/chat/${panel.chatId}`}
-          title="Open as a page"
-          aria-label="Open this chat as a full page"
+          href={`/people?open=${panel.chatId}`}
+          title="Open in Rooms"
+          aria-label="Open this chat in Rooms"
           className="px-1 text-xs text-muted transition hover:text-foreground"
         >
           ⤢

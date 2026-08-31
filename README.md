@@ -8,16 +8,19 @@ authorisation boundary.**
 Built as a take-home for Moritz Legal. TypeScript end to end: Next.js on Vercel,
 Postgres on Supabase.
 
-> **Live at <https://quorum-rho.vercel.app>.** Verify the claims yourself with
-> [`docs/VERIFY.md`](docs/VERIFY.md) — every check states what to do, what to
-> expect, and what failure looks like.
+> **Live at <https://quorum-rho.vercel.app>.** Sign in with Google, or — since
+> demonstrating authorisation needs several identities in the same room at
+> once — with one of the seeded accounts on the landing page when dev sign-in
+> is enabled. Verify the claims yourself with [`docs/VERIFY.md`](docs/VERIFY.md)
+> — every check states what to do, what to expect, and what failure looks like.
 >
 > **Status: built and deployed.** Auth, chats, the response gate, the turn
-> pipeline, memory retrieval and extraction, and the agent internal view are all
-> implemented, with ~300 assertions passing against a real PostgreSQL. What has
-> The unauthenticated half of the authorisation story is verified against
+> pipeline, memory retrieval and extraction, connectors, admin mode, and the
+> agent internal view are all implemented, with **626 assertions passing**
+> against a real PostgreSQL (34 files, 17 intentionally `todo`). The
+> unauthenticated half of the authorisation story is verified against
 > production; authenticated flows need a human with a Google account and are
-> marked as unverified in [`PLAN.md`](PLAN.md) until someone runs them.
+> scripted step-by-step in [`docs/VERIFY.md`](docs/VERIFY.md).
 
 ---
 
@@ -281,17 +284,67 @@ Requires Node 22+, pnpm 9+, a Supabase project, and an Anthropic API key.
 
 ```bash
 pnpm install
-cp .env.example .env.local   # then fill it in
+cp .env.example .env.local   # then fill it in — see below
 pnpm dev
 ```
 
 Filling in `.env.local`, in exact steps:
 
-- **Supabase** — [`docs/SETUP-SUPABASE.md`](docs/SETUP-SUPABASE.md)
-- **Vercel** — [`docs/SETUP-VERCEL.md`](docs/SETUP-VERCEL.md)
+- **Supabase** — [`docs/SETUP-SUPABASE.md`](docs/SETUP-SUPABASE.md) (~25 min,
+  mostly Google's OAuth consent screen)
+- **Vercel** — [`docs/SETUP-VERCEL.md`](docs/SETUP-VERCEL.md), only needed to
+  deploy your own copy rather than run it locally
+
+**Talking to more than one person without setting up Google OAuth first:**
+set `ALLOW_DEV_LOGIN=true` in `.env.local` and run `pnpm seed:dev`. The
+landing page then offers five seeded accounts (`alice`…`erin`) with different
+clearances and overlapping chats — enough to see both authorisation axes and
+the memory surfacing rule without a second browser profile. This route is
+closed by three independent checks the moment `NODE_ENV=production`; see
+`app/auth/dev/route.ts`.
 
 Model selection, thinking depth, cost tiers, gate thresholds, memory caps and
 rate limits all live in [`config/`](config/) — not scattered through the code.
+
+**Verifying the claims, not just running the app:**
+
+```bash
+pnpm check    # boundaries + lint + test — the same gate CI runs
+pnpm test     # 626 assertions, including the full authorisation/memory suite
+```
+
+`pnpm test` provisions its own real PostgreSQL 18.4 automatically — no Docker,
+no `DATABASE_URL` to set by hand. `tests/global-setup.ts` starts genuine
+Postgres binaries via `embedded-postgres` the first time it runs (a few
+seconds), then reuses that instance on later runs. This matters: an in-JS
+Postgres emulator would not implement row-level security, and RLS is the thing
+under test — a harness that cannot enforce a policy cannot verify one. If
+`TEST_DATABASE_URL` is already set (CI, or your own `supabase start`), that
+database is used instead.
+
+---
+
+## What it looks like
+
+Screenshots from a running instance — replace the placeholders below with your
+own by signing in (dev login is fastest, see above) and capturing each view:
+
+| View | What to capture |
+|---|---|
+| `docs/screenshots/workspace.png` | `/chats` — the People/Groups directory, with the Q tile |
+| `docs/screenshots/rooms.png` | `/people` — a room open, roster visible, agent internal view expanded |
+| `docs/screenshots/memory.png` | `/memory` — the subject-access view, showing an item withheld from one room |
+| `docs/screenshots/capabilities.png` | `/connectors` — the Capabilities page listing every tool the agent can call |
+
+```markdown
+![Workspace](docs/screenshots/workspace.png)
+![Rooms, with the agent internal view open](docs/screenshots/rooms.png)
+![Memory subject-access page](docs/screenshots/memory.png)
+![Capabilities page](docs/screenshots/capabilities.png)
+```
+
+Until those are captured, the fastest way to see the actual UI is the deployed
+build itself: <https://quorum-rho.vercel.app>.
 
 ---
 
@@ -387,10 +440,7 @@ requirement, not because each one is obviously correct.
 
 ## Tradeoffs and what comes next
 
-To be written against the finished build, from the running log in
-[`docs/DECISIONS.md`](docs/DECISIONS.md).
-
-Known deliberate cuts so far:
+Deliberate cuts, against the finished build:
 
 - **No knowledge graph.** `memory_nodes` / `memory_edges` were designed and then
   cut, and the cut was tested rather than assumed. The bar set was: *name three
@@ -405,10 +455,27 @@ Known deliberate cuts so far:
   requirement for branching provenance (a fact derived from two others, which
   `superseded_by` cannot express), or a "trace this instruction back to who
   authorised it" feature — plausible for a legal product.
-- **Gmail integration** is the first thing dropped if time runs short.
-- **The force-directed space view is scheduled last on purpose.** It is the most
-  visually impressive piece and the least graded; a conventional list view ships
-  first and remains the fallback.
+- **No embedding provider.** Ranking is lexical (`ts_rank`) plus recency plus
+  speaker presence, not semantic similarity — see [D-004](docs/DECISIONS.md)
+  above. `lib/memory/embed.ts` ships as an unimplemented interface so adding
+  one later is a one-file change, not a schema change.
+- **The force-directed space view was never built.** It was scheduled last on
+  purpose — the most visually impressive piece and the least graded — and the
+  12-hour budget did not reach it. A list-and-detail view (Rooms) ships instead
+  and is the only conversation view; there is no second, richer one waiting
+  behind a flag.
+- **Partial-turn resume is out of scope.** A retry that arrives after the
+  model call already succeeded and was already billed, but before the reply
+  was persisted, is not handled — stated as a limit rather than left looking
+  like an oversight. See [D-011](docs/DECISIONS.md).
+
+What shipped beyond the original Tier-1/2 scope: read-only Gmail and Calendar
+connectors (gated per-user, behind the same authorisation context every other
+agent read goes through), a self-service admin mode for demonstrating both
+authorisation axes from one browser, a subject-access memory page (what the
+agent has learned about *you*, specifically), and a seeded two-room demo world
+so the memory-withholding claim is something a reviewer can watch happen
+rather than take on faith.
 
 ## On AI tooling
 

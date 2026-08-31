@@ -4,10 +4,13 @@ High-level design and the file-by-file fan-out. Written before implementation so
 that the shape is argued about once, in one place, rather than emerging by
 accident.
 
-Status: **Phase 1 built, Phase 2 starting.** Live progress per item is in
-[PLAN.md](../PLAN.md); this document describes the shape, not the state. Where
-implementation diverged from what was designed here, the divergence is recorded
-inline rather than quietly conformed to.
+Status: **Tier 1 complete; most of Tier 2 shipped** — memory retrieval and
+extraction, connectors (Gmail/Calendar), admin mode, and a demo world are all
+built alongside the base chat/authorisation surface. Live progress per item is
+in [PLAN.md](../PLAN.md); this document describes the shape, not the state.
+Where implementation diverged from what was designed here, the divergence is
+recorded inline rather than quietly conformed to. §6 lists what shipped beyond
+this diagram's original scope.
 
 ---
 
@@ -19,7 +22,7 @@ Browser
   │  fetch() — writes and all agent work go through route handlers
   ▼
 Next.js App Router  (Vercel)
-  ├── (marketing)          public landing
+  ├── page.tsx             public landing + sign in
   ├── (app)                authenticated surfaces
   └── api/                 route handlers — the only writers
         │
@@ -257,7 +260,9 @@ event and the chat stays usable. A broken agent must never take the chat down.
 | `browser.ts` | t1 | Publishable-key client for client components | Never sees a secret. RLS is the guard. |
 | `server.ts` | t1 | Session-bound client for route handlers and RSC | Acts *as the user*. RLS applies. |
 | `scoped-agent.ts` | t2 | `ScopedAgentContext` — the agent's entire world | The only file permitted to read `SUPABASE_SECRET_KEY`. Fixes turn identity (chat, actor, `turn_id`) at construction. **Does not cache membership or clearance** — those are re-read in SQL on every privileged call, because holding them across the model call is the TOCTOU gap (D-009). |
-| `types.ts` | t1 | Row types | **Currently hand-authored** from the migrations, because generation needs a provisioned project. Replaced by `pnpm supabase gen types` output at that point, after which it is generated and never hand-edited. |
+| `types.ts` | t1 | Row types | Generated via `supabase gen types typescript --linked`, regenerated after every migration. Never hand-edited. |
+| `rows.ts` | t1 | Narrow, hand-named row shapes for common joins (the generated types embed relations as arrays regardless of cardinality) | — |
+| `profiles.ts` | t1 | `namesFor()` — the one helper that turns a set of user ids into `{name, color}`, because a `profiles` embed cannot express "only if still a member" | — |
 
 ### `lib/memory/`
 
@@ -268,19 +273,26 @@ event and the chat stays usable. A broken agent must never take the chat down.
 | `conflict.ts` | t2 | Deterministic, ordered resolution: stated > inferred; newer > older; genuine tie writes a `memory_conflict` event. **The model is never asked which fact it prefers** — that is not reproducible. |
 | `audience.ts` | t2 | Snapshot writer and containment predicate. Small, and heavily tested. |
 | `embed.ts` | t2 | Embedding provider behind an interface. Blocked on D-004 / R3. |
+| `mine.ts` | t2 | `myMemory()` — the subject-access read. Deliberately **not** filtered by the surfacing rule: what the agent knows about you and what it may repeat in a given room are different questions, and this answers the first. Backed by `public.my_memory()` (migration 0019), which returns only rows where `subject_user_id = auth.uid()`. |
 
 ### `lib/agent/`
 
 | File | Tier | Responsibility |
 |---|---|---|
-| `gate.ts` | t1 | Deterministic chain (rules 1–6), then the judge. Returns `{verdict, rule, reason}`. Pure and trivially unit-testable — the chain takes a message plus chat state, not a database. |
+| `gate.ts` | t1 | Deterministic chain (rules 1–6, including name/prefix addressing — `@q`, `@quorum`, or "Q"/"Quorum" at message start), then the judge. Returns `{verdict, rule, reason}`. Pure and trivially unit-testable — the chain takes a message plus chat state, not a database. |
+| `judge.ts` | t1 | The LLM step of the gate: a discrete verdict (D-020), never a thresholded float, biased to silence (D-008). |
 | `orchestrator.ts` | t2 | The turn pipeline above. Owns `turn_id`. Owns ordering; owns nothing else. |
 | `context.ts` | t2 | Prompt assembly within the token budget; emits `context_dropped`. |
+| `research.ts` | t2 | The bounded multi-step research loop (D-022 least-privilege applies once it touches untrusted content) |
+| `catalogue.ts` | t2 | Hand-written description of every capability, for the Capabilities page — kept in sync with the tool registry by `tests/ui/catalogue.test.ts`, not generated from it |
 | `prompts/` | t2 | System prompts as files, not string literals in logic. |
 | `tools/index.ts` | t3 | Tool registry + the shared `Tool` interface |
-| `tools/web-search.ts` | t3 | Bounded search; results summarised into context, never dumped raw |
-| `tools/file-read.ts` | t3 | Storage read *through the scoped context* |
-| `tools/research.ts` | t3 | Bounded multi-step loop with a hard step cap |
+| `tools/web.ts` | t3 | Bounded web search/fetch; `url-safety.ts` blocks private/link-local targets (SSRF) before a fetch is attempted |
+| `tools/file.ts` | t3 | Storage read *through the scoped context* |
+| `tools/document.ts` | t3 | PDF (`unpdf`) and DOCX (`mammoth`) text extraction, plus extract-to-schema with quotes checked against the source text |
+| `tools/connectors.ts` | t3 | Gmail/Calendar reads via the user's own OAuth grant (`lib/connectors/`), scoped read-only |
+| `tools/session.ts` | t3 | Per-turn tool session bookkeeping (the post-untrusted-content allowlist switch, D-022) |
+| `tools/fence.ts` | t3 | Delimits untrusted tool output before it re-enters the model's context. Documented as **defence in depth, not a security control** — the actual guarantee against injection is D-022's post-untrusted tool cutoff, enforced in code outside the model's reach. |
 
 **Tool interface, so a new tool is one file:**
 
@@ -329,22 +341,83 @@ inherits authorisation from `ctx` **only under this invariant**.
 | `log.ts` | t1 | Append-only `agent_events` writer. Insert only — no update, no delete. |
 | `types.ts` | t1 | Discriminated union of event payloads. Adding a variant is a type change, not a migration. |
 
+### `lib/connectors/` — read-only Gmail and Calendar (t3)
+
+| File | Responsibility |
+|---|---|
+| `google.ts` | Four hand-written `fetch` calls, not the generated `googleapis` client — a stray call the client permits but the granted scopes don't is a call nobody reviewed; four endpoints are auditable in one screen. |
+| `crypto.ts` | AES-256-GCM envelope encryption for refresh tokens at rest. RLS defends against a query; a backup or a support tool reading the table directly is a different failure mode, so the token is unreadable even then. |
+
+`connector_tokens` (migration `0014`) has RLS **on with zero policies** — the
+table is reachable only through `SECURITY DEFINER` functions, never a direct
+`select`.
+
+### `lib/auth/` — session and demo-mode gates (t1)
+
+| File | Responsibility |
+|---|---|
+| `admin-mode.ts` | Gates the self-service clearance/membership grant used to demonstrate both authorisation axes from one browser. Three independent switches (env flag, server-only secret, an empty-by-default DB row) so a production deploy with none of them set leaves the feature dead regardless of the others. Named plainly as a self-service privilege escalation — see the file's own header — never described as safe in general. |
+| `dev-users.ts` | The seeded cast (`alice`…`erin`) and `devLoginEnabled()`, chosen so a single glance at the chat list demonstrates axis-independence (a member with no clearance) and the clearance floor (identical membership, different clearance). |
+| `profile.ts` | `ensureProfile()` and the deterministic per-user colour, so a person is the same colour everywhere without storing a choice. |
+
+### `lib/demo/` — the guided first-run world (t1)
+
+| File | Responsibility |
+|---|---|
+| `seed.ts` | `ensureDemoWorld()` / `resetDemoWorld()`, thin wrappers around the `SECURITY DEFINER` RPCs in migration `0020`. Called through the session-bound client, never the service role — a demo room is built with the same authority the user already has, not manufactured by an agent that bypasses it. |
+| `suggestions.ts` | Composer suggestion chips for the two demo rooms. Sent through the ordinary message path when tapped — same idempotency RPC, same gate — deliberately not a second send path. |
+| `sample-pdf.ts` | A hand-written, genuinely-parseable one-page PDF for the contract-review room, so the demo exercises the real `document_extract` path rather than a renamed `.txt`. |
+
+Exactly two rooms per new signup, one seed message total: a DM with "Priya"
+(one backdated message plus the sample PDF) and a group with Priya **and**
+Sam that deliberately carries no seed message — its only job is being a room
+Priya was in that Sam wasn't, so memory withholding has something real to
+withhold. A broader "scripted reply mid-conversation on behalf of another
+user" design was considered and rejected as a message-forgery primitive; see
+the header of migration `0020`.
+
+### `lib/ui/` — rendering attacker-controlled content (t1)
+
+| File | Responsibility |
+|---|---|
+| `markdown.ts` | Parses message content to a typed tree, not an HTML string — there is no `dangerouslySetInnerHTML` for an injected `<script>` to reach, because no HTML string is ever produced. `![x](y)` deliberately downgrades to a link node, never an `<img>` (which would fetch on the reader's behalf with no click). |
+| `safe-url.ts` | Only `http:`/`https:` become clickable links; `javascript:`, `data:`, `vbscript:`, `file:` render as inert text. |
+
 ### `app/`
 
 | Path | Tier | Responsibility |
 |---|---|---|
 | `proxy.ts` | t1 | Session refresh + redirect. **Next 16 renamed `middleware.ts`, and the name change is useful here:** this is UX, not a guard. CVE-2025-29927 let a spoofed header skip every middleware check — the lesson is thesis #2. RLS is the boundary. |
 | `app/auth/callback/route.ts` | t1 | PKCE `exchangeCodeForSession`. Must return `Cache-Control: private, no-store`, or a CDN can serve one user's session response to another. |
-| `(marketing)/page.tsx` | t1 | Landing + sign in with Google |
-| `(app)/layout.tsx` | t1 | Auth guard, profile bootstrap. Resolves the actor with **`getClaims()`, never `getSession()`** — Supabase says not to trust the latter server-side because it does not revalidate, and an authorisation decision made on it runs on a claim Supabase itself would reject. |
-| `(app)/chats/page.tsx` | t1 | **List view — ships first, remains the fallback** |
-| `(app)/chat/[chatId]/page.tsx` | t1 | Full-screen chat |
-| `(app)/space/page.tsx` | t3 | Force-directed space view — **`d3-force` with SVG, not canvas.** Canvas costs hand-rolled hit-testing and accessibility work in the feature most likely to be cut; at a few hundred nodes SVG is fine. |
-| `api/chats/route.ts` | t1 | Create / list |
-| `api/chats/[chatId]/messages/route.ts` | t1 | Send message; idempotent on `client_message_id` |
+| `page.tsx` | t1 | Landing + sign in (Google, plus seeded dev accounts when `ALLOW_DEV_LOGIN=true`) |
+| `auth/dev/route.ts` | t1 | Dev-only sign-in bypass — 404s rather than 403s when disabled, so a probe cannot confirm it exists. Three independent gates; see the file's own header. |
+| `(app)/layout.tsx` | t1 | Auth guard, profile bootstrap, demo-world bootstrap. Resolves the actor with **`getClaims()`, never `getSession()`**. |
+| `(app)/chats/page.tsx` | t1 | Workspace — People/Groups directory, the "who and what exists here" view |
+| `(app)/people/page.tsx` | t1 | **Rooms** — every conversation you're in, Slack-shaped: a list on the left, the open one (chat + roster + internal view) on the right. Accepts `?open=<chatId>` to pre-select a room. |
+| `(app)/chat/[chatId]/page.tsx` | t1 | **A redirect, not a page** — `redirect('/people?open=' + chatId)`. Superseded by Rooms once Rooms could show a chat, roster and internal view together; kept only so old links (pop-outs, the account page's group list) still resolve. |
+| `(app)/account/page.tsx` | t1 | Your own clearance ladder, your rooms, and clearance-granting (`grant_clearance()`, D-003's write path) |
+| `(app)/memory/page.tsx` | t2 | Subject-access view — what the agent has learned about *you*, via `my_memory()`, independent of the surfacing rule |
+| `(app)/connectors/page.tsx` | t3 | "Capabilities" — every tool the agent can call, from `lib/agent/catalogue.ts`; Google OAuth connect/disconnect |
+| `(app)/admin/page.tsx` | t1 | Admin mode UI — `notFound()`, never `403`, when the feature is disabled |
+| `(app)/usage/page.tsx` | t2 | `llm_calls` cost/usage rollup |
+| `api/chats/route.ts` | t1 | Create / list groups |
+| `api/dm/route.ts` | t1 | Find-or-create a DM for a pair, so the same two people never end up with two DMs splitting one memory audience across rooms |
+| `api/chats/[chatId]/messages/route.ts` | t1 | Send message; idempotent on `client_message_id`; kicks off the agent turn in `after()` |
 | `api/chats/[chatId]/members/route.ts` | t2 | Invite, request, approve, remove, promote |
-| `api/agent/turn/route.ts` | t2 | Agent pipeline entry, streaming |
-| `api/chats/[chatId]/events/route.ts` | t2 | Internal-view feed |
+| `api/chats/[chatId]/files/route.ts` | t2 | Upload, scoped to the chat |
+| `api/clearances/route.ts` | t1 | Grant a clearance rung (never above the granter's own) |
+| `api/connectors/google/{start,callback}/route.ts` | t3 | OAuth authorize/exchange; CSRF `state` compared with `timingSafeEqual` |
+| `api/demo/reset/route.ts` | t1 | Rebuilds the caller's own demo world only |
+| `api/admin/route.ts` | t1 | Dispatches to the `dev_self_*` admin-mode RPCs |
+
+**No `api/agent/turn/route.ts` and no `api/chats/[chatId]/events/route.ts`.**
+The turn runs inside the message route's `after()` rather than a second
+endpoint (D-028, below), and the internal view reads `agent_events`/`llm_calls`
+directly through the browser client — RLS is the same guard either way, so a
+proxy endpoint would add a round-trip for no additional authorisation.
+
+**No `(app)/space/page.tsx`.** The force-directed space view (D-025) was
+Tier-3, list-view-first work, and the 12-hour budget did not reach it.
 
 ### `supabase/migrations/`
 
@@ -352,16 +425,28 @@ Numbered, additive, never edited once applied. **Every table gets its RLS policy
 in the migration that creates it.**
 
 ```
-0001_extensions.sql          pgcrypto
-0002_profiles_clearances.sql profiles, clearances, user_clearances + RLS
-0003_chats_members.sql       chats, chat_members + RLS + the membership predicate fn
-0004_messages.sql            messages + RLS + idempotency constraint
-                             + send_message_and_start_turn() RPC
-0005_agent_events.sql        agent_events, llm_calls + RLS
-0006_memory.sql              memory_items, memory_audience
-                             RLS ON, NO permissive policy, grants revoked
-0007_files.sql               files + storage bucket policies
-0008_seed_clearances.sql     the clearance ladder from config/agent.ts
+0001_extensions.sql              pgcrypto
+0002_profiles_clearances.sql     profiles, clearances, user_clearances + RLS
+0003_chats_members.sql           chats, chat_members + RLS + the membership predicate fn
+0004_messages.sql                messages + RLS + idempotency constraint
+                                 + send_message_and_start_turn() RPC
+0005_agent_events.sql            agent_events, llm_calls + RLS
+0006_memory.sql                  memory_items, memory_audience
+                                 RLS ON, NO permissive policy, grants revoked
+0007_files.sql                   files + storage bucket policies
+0008_seed_clearances.sql         the clearance ladder from config/agent.ts
+0009_rpc_surface.sql             public RPC wrappers over the `private` predicates, service_role only — what scoped-agent.ts calls to re-check per D-009
+0010_memory_rpc.sql              memory_for_chat(), write_memory_item() — the only entry points into memory_items
+0011_create_chat.sql             create_chat() RPC — atomic chat + first-member insert, closing the same orphaned-chat/zero-member gap T1 warns about
+0012_grant_clearance.sql         grant_clearance() — never above the granter's own level
+0013_storage_policies.sql        Storage bucket policies for file attachments
+0014_connector_tokens.sql        connector_tokens — RLS on, ZERO policies; AES-256-GCM at rest
+0015_realtime_publication.sql    adds messages + agent_events to supabase_realtime
+0016_admin_mode.sql              private.admin_mode_secret (empty by design), admin_mode_log, dev_self_* RPCs
+0017_default_groups.sql          auto-join new signups to ungated groups
+0018_backfill_default_groups.sql one-time backfill for pre-existing accounts
+0019_my_memory.sql               my_memory() — the subject-access read, ignores the surfacing rule on purpose
+0020_demo_world.sql              ensure_demo_world() / reset_demo_world(); excludes demo chats from 0017's auto-join
 ```
 
 No `vector` extension in `0001` — D-004 closed against embeddings in v1.
@@ -375,15 +460,20 @@ footgun, and part of research track R1.
 Organised by the claim under test, not by source file.
 
 ```
-config.test.ts                      tier/model invariants, no DB or key needed
-authorization/  rls-foundation.test.ts  membership.test.ts  clearance.test.ts
-                messages.test.ts
-memory/         isolation.test.ts       lifecycle.test.ts
-agent/          gate.test.ts            judge.test.ts       llm-errors.test.ts
-                scoped-context-invariant.test.ts  output-sanitisation.test.ts
-auth/           dev-login-gate.test.ts
-tools/          scoping.test.ts
+config.test.ts, config-env.test.ts        tier/model invariants, no DB or key needed
+authorization/  rls-foundation  membership  clearance  clearance-grants
+                messages  create-chat  connector-tokens  demo-world
+memory/         isolation  lifecycle  conflict  ranking  mine  my-memory  rpc
+agent/          gate  judge  research  llm-errors
+                scoped-context-invariant  output-sanitisation
+auth/           dev-login-gate
+tools/          scoping  document  session  url-safety  safe-name
+connectors/     crypto  registration
+files/          extract-text
+ui/             catalogue  event-trace  markdown
 ```
+
+(each entry above is `<name>.test.ts` under its directory)
 
 Everything under `authorization/`, `memory/` and `tools/` runs against a real
 Postgres 18.4 as an **unprivileged role** — testing RLS through a service-role
@@ -413,3 +503,38 @@ The load-bearing one is `ScopedAgentContext`. Because every agent read goes
 through it, a new capability inherits the authorisation boundary rather than
 re-implementing it — which is the difference between adding a tool and adding a
 vulnerability.
+
+---
+
+## 6. What shipped beyond this diagram
+
+This document was written before implementation and describes the shape
+argued about at the start. Several things were built during Tier 2 that this
+diagram never anticipated, listed here rather than woven back into §1–5 as if
+they had always been planned:
+
+- **Memory subject access** (`lib/memory/mine.ts`, `my_memory()`, the
+  `/memory` page) — a second, deliberately *un*-filtered read path into
+  `memory_items`, answering "what does the agent know about me" rather than
+  "what may it repeat in this room."
+- **Connectors** (`lib/connectors/`, `/connectors`) — read-only Gmail and
+  Calendar, gated per-user (their own OAuth grant, not a shared credential)
+  and gated twice (connector present *and* the tool call scoped to it).
+- **Admin mode** (`lib/auth/admin-mode.ts`, migration `0016`, `/admin`) — a
+  named, three-gated, self-service privilege escalation that exists solely so
+  the two-axis authorisation model is demonstrable from one browser.
+- **A demo world** (`lib/demo/`, migration `0020`) — two seeded rooms per new
+  signup, built to make audience isolation something a reviewer can *see*
+  happen rather than take on faith.
+- **Rooms** (`app/(app)/people/page.tsx`, `app/_components/rooms/`) — the
+  Slack-shaped list-plus-open-conversation view that `/chat/[chatId]`
+  redirects into; it renders the same `ChatSurface`, `Roster` and
+  `InternalView` the old full-page route did, loaded client-side per
+  selection instead of per navigation.
+- **Floating panels** (`app/_components/floating-panels/`) — pop-out chat
+  windows over the Workspace view, so opening someone's DM does not require
+  leaving whatever else is on screen.
+- **The redaction visual system** (`app/_components/clearance.tsx`) — colour
+  encodes clearance and nothing else; `<Redacted>` takes a width, never
+  content, because CSS-hidden text still reaches view-source and the
+  clipboard.

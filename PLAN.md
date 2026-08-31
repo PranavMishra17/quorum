@@ -18,9 +18,10 @@ PHASE 2  Memory + agent depth + polish        ███████████�
 PHASE 3  Tools, capability, polish, submit    ████████████████  ~98%  ← WE ARE HERE
 ```
 
-**Right now:** Phase 3. Every tool that was in scope is built. What remains is
-the submission itself, plus two decorative items (space view, floating panels)
-that were always first to go.
+**Right now:** Phase 3. Every tool that was in scope is built, floating panels
+shipped, and the old full-page chat route was folded into Rooms. What remains
+is the submission itself, plus one decorative item (the space view) that was
+always first to go.
 
 **Phase 1 is closed.** It was carried at ~90% for two reasons, both now
 resolved: `lib/db/types.ts` was a hand-written placeholder, and Google sign-in
@@ -370,6 +371,38 @@ demo and worse engineering:
 | `toolDefinition` described **every** input property as a string. Fine for three tools with one string input between them; wrong the moment one took an array. The model would have sent a string and had it rejected by the schema that had just described it — and the symptom is a model that merely *appears* not to use its tools well | `z.toJSONSchema` over the same object that validates the input, so the description and the enforcement cannot disagree |
 | The turn route declared `maxDuration = 60` while `TIERS.reason` budgeted 240s and research 180s — both budgets for a container four times larger than the one they ran in, and `after()` work counts toward that duration | One number, `PLATFORM.turnRouteMaxDurationSeconds`, asserted against every tier and against research |
 | `googleapis` was a dependency for four endpoints | Removed. Plain `fetch`: the request that goes out is the request you can read |
+
+### Rooms consolidation, docs sanity check, and a landing-page copy pass
+
+- **The full-page chat route is now a redirect, not a page.** `/chat/[chatId]`
+  used to render its own copy of chat + roster + internal view. Rooms
+  (`/people`) grew the same three things side by side once it existed, which
+  made the full page a second way to reach the same data rather than a
+  distinct feature — so it is now `redirect('/people?open=' + chatId)`, and
+  every link that used to point at it (pop-outs, the account page's group
+  list, the memory page's origin-chat link) points at `?open=` instead. Roster
+  actions (promote/remove/approve/leave) needed their own refetch trigger
+  added, since Rooms loads its data client-side and `router.refresh()` alone
+  only re-renders the server-fed room *list*, not an already-open pane.
+- **`docs/DECISIONS.md` had three stale headings.** D-004, D-007 and D-009
+  each said **OPEN** in the heading while their own `**Status.**` line, a few
+  paragraphs down, said CLOSED — found by a direct sanity check against
+  `CLAUDE.md`'s summary table, which had always treated them as settled. Fixed
+  to match the body, which was correct all along.
+- **`docs/ARCHITECTURE.md` had drifted from the code it describes** — wrong
+  migration range, tool files that were renamed or never existed
+  (`web-search.ts`, `file-read.ts`), a route (`api/agent/turn/route.ts`) that
+  was never built because the turn runs in `after()` instead, and no mention
+  at all of memory subject-access, connectors, admin mode, or the demo world.
+  Rewritten against the actual `lib/`/`app/`/`supabase/migrations/` trees
+  rather than patched line by line.
+- **Landing page copy rewritten.** The two-column explainer used to narrate
+  the take-home's own framing back at the reader (*"the leak the brief
+  invites"*), and the sign-in panel said outright that authentication was the
+  easy part — both read like notes to a grader, not product copy, and neither
+  belongs on a page a real user would land on. Replaced with copy about what
+  the product actually does; the visual design (the redaction system, the
+  two-room demonstration) is unchanged.
 
 ### Demo layer — BUILT (migration 0020)
 

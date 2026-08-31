@@ -91,7 +91,7 @@ export function InternalView({
       </button>
 
       {open && (
-        <div className="border-t border-border px-4 py-3">
+        <div className="max-h-72 overflow-y-auto border-t border-border px-4 py-3">
           {turns.length === 0 ? (
             <p className="py-4 text-xs text-muted">
               Nothing yet. Every turn is recorded here, including the ones where

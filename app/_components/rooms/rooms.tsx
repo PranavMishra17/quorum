@@ -6,6 +6,8 @@ import { namesFor } from '@/lib/db/profiles';
 import { ChatSurface, type UiMessage } from '../chat-surface';
 import { ClearanceStamp } from '../clearance';
 import { DemoStamp } from '../demo-stamp';
+import { Roster, type RosterMember } from '../roster';
+import { InternalView } from '../internal-view';
 import type { EventRow, CallRow } from '../event-trace';
 
 export interface RoomSummary {
@@ -31,8 +33,20 @@ export interface RoomSummary {
  * It is the same `ChatSurface`, the same queries and the same RLS — this view
  * adds a way to navigate, not a second way to read.
  */
-export function Rooms({ rooms, meId }: { rooms: RoomSummary[]; meId: string }) {
-  const [selected, setSelected] = useState<string | null>(rooms[0]?.id ?? null);
+export function Rooms({
+  rooms,
+  meId,
+  initialSelected,
+}: {
+  rooms: RoomSummary[];
+  meId: string;
+  initialSelected?: string | null;
+}) {
+  const [selected, setSelected] = useState<string | null>(
+    (initialSelected && rooms.some((r) => r.id === initialSelected) ? initialSelected : null) ??
+      rooms[0]?.id ??
+      null,
+  );
   const [filter, setFilter] = useState('');
 
   const groups = useMemo(() => {
@@ -156,6 +170,8 @@ interface Loaded {
   messages: UiMessage[];
   events: EventRow[];
   calls: CallRow[];
+  roster: RosterMember[];
+  amAdmin: boolean;
 }
 
 /**
@@ -165,6 +181,11 @@ interface Loaded {
  */
 function RoomPane({ room, meId }: { room: RoomSummary; meId: string }) {
   const [data, setData] = useState<Loaded | 'loading' | 'error'>('loading');
+  // Bumped after a roster action (promote/remove/approve/leave) so the effect
+  // below re-fetches. router.refresh() alone re-renders the server-fed rooms
+  // list, but this pane's roster/messages come from its own client fetch,
+  // which nothing else would ever re-trigger.
+  const [reloadTick, setReloadTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -173,7 +194,9 @@ function RoomPane({ room, meId }: { room: RoomSummary; meId: string }) {
       const supabase = createClient();
       const [{ data: members }, { data: messages }, { data: events }, { data: calls }] =
         await Promise.all([
-          supabase.from('chat_members').select('user_id').eq('chat_id', room.id).eq('status', 'member'),
+          // No status filter: admins need to see pending join requests, and
+          // RLS already decides which rows are visible at all.
+          supabase.from('chat_members').select('user_id, role, status').eq('chat_id', room.id),
           supabase
             .from('messages')
             .select('id, sender_type, sender_id, content, created_at, turn_id')
@@ -195,12 +218,20 @@ function RoomPane({ room, meId }: { room: RoomSummary; meId: string }) {
         ]);
       if (cancelled) return;
 
-      const ids = ((members ?? []) as unknown as { user_id: string }[]).map((m) => m.user_id);
+      const roster = (members ?? []) as unknown as {
+        user_id: string; role: 'admin' | 'member'; status: RosterMember['status'];
+      }[];
+      const ids = roster.map((m) => m.user_id);
       const map = await namesFor(supabase, ids);
       if (cancelled) return;
 
       const people: Record<string, { name: string; color: string }> = {};
-      for (const [id, p] of map) people[id] = p;
+      for (const m of roster) {
+        const p = map.get(m.user_id);
+        if (p && m.status === 'member') people[m.user_id] = p;
+      }
+
+      const me = roster.find((m) => m.user_id === meId);
 
       const rows = (messages ?? []) as unknown as {
         id: string; sender_type: 'user' | 'agent'; sender_id: string | null;
@@ -211,6 +242,14 @@ function RoomPane({ room, meId }: { room: RoomSummary; meId: string }) {
         people,
         events: (events ?? []) as unknown as EventRow[],
         calls: (calls ?? []) as unknown as CallRow[],
+        amAdmin: Boolean(me && me.status === 'member' && me.role === 'admin'),
+        roster: roster.map((m) => ({
+          userId: m.user_id,
+          name: map.get(m.user_id)?.name ?? 'Someone',
+          color: map.get(m.user_id)?.color ?? 'var(--agent)',
+          role: m.role,
+          status: m.status,
+        })),
         messages: rows.map((m) => ({
           id: m.id,
           senderType: m.sender_type,
@@ -230,7 +269,7 @@ function RoomPane({ room, meId }: { room: RoomSummary; meId: string }) {
       if (!cancelled) setData('error');
     });
     return () => { cancelled = true; };
-  }, [room.id]);
+  }, [room.id, meId, reloadTick]);
 
   return (
     <div className="flex h-full min-h-0 flex-col border border-border bg-surface">
@@ -252,13 +291,6 @@ function RoomPane({ room, meId }: { room: RoomSummary; meId: string }) {
         {!room.isDemo && (
           <ClearanceStamp level={room.clearance?.level ?? 0} name={room.clearance?.name} />
         )}
-        <a
-          href={`/chat/${room.id}`}
-          title="Open as a page"
-          className="label border border-border px-2 py-1 text-muted transition hover:text-foreground"
-        >
-          Full page
-        </a>
       </div>
       {room.isDemo && (
         <p className="text-xs leading-relaxed text-muted">
@@ -270,7 +302,7 @@ function RoomPane({ room, meId }: { room: RoomSummary; meId: string }) {
       )}
       </header>
 
-      <div className="min-h-0 flex-1 px-4 pb-4">
+      <div className="flex min-h-0 flex-1 flex-col px-4 pb-4">
         {data === 'loading' && (
           <div className="flex h-full flex-col justify-end gap-3 py-4" aria-busy="true">
             <span className="sr-only">Opening conversation</span>
@@ -283,16 +315,35 @@ function RoomPane({ room, meId }: { room: RoomSummary; meId: string }) {
           <p className="py-6 text-xs text-muted">This conversation could not be opened.</p>
         )}
         {data !== 'loading' && data !== 'error' && (
-          <ChatSurface
-            chatId={room.id}
-            meId={meId}
-            initialMessages={data.messages}
-            people={data.people}
-            initialEvents={data.events}
-            initialCalls={data.calls}
-            containerClassName="flex h-full flex-col"
-            demoKind={room.demoKind}
-          />
+          <>
+            <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[1fr_16rem]">
+              <ChatSurface
+                chatId={room.id}
+                meId={meId}
+                initialMessages={data.messages}
+                people={data.people}
+                initialEvents={data.events}
+                initialCalls={data.calls}
+                containerClassName="flex h-full min-h-0 flex-col"
+                demoKind={room.demoKind}
+              />
+              {room.type !== 'agent' && (
+                <Roster
+                  chatId={room.id}
+                  meId={meId}
+                  members={data.roster}
+                  amAdmin={data.amAdmin}
+                  chatType={room.type}
+                  onChanged={() => setReloadTick((n) => n + 1)}
+                />
+              )}
+            </div>
+            <InternalView
+              chatId={room.id}
+              initialEvents={data.events}
+              initialCalls={data.calls}
+            />
+          </>
         )}
       </div>
     </div>

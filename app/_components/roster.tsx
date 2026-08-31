@@ -28,12 +28,16 @@ export function Roster({
   members,
   amAdmin,
   chatType,
+  onChanged,
 }: {
   chatId: string;
   meId: string;
   members: RosterMember[];
   amAdmin: boolean;
   chatType: 'dm' | 'group' | 'agent';
+  /** Called after a successful action, for a caller whose own data (e.g. a
+   * client-fetched roster) `router.refresh()` cannot reach on its own. */
+  onChanged?: () => void;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
@@ -51,6 +55,7 @@ export function Roster({
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error ?? 'not permitted');
       router.refresh();
+      onChanged?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'not permitted');
     } finally {
